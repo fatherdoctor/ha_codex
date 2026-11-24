@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import remote_control as rc
 from test_server import server
+from remote_unpaused import setUpModule, tearDownModule  # noqa: F401  (Remote Control is paused)
 
 
 class RelayExecutionTests(unittest.TestCase):
@@ -44,7 +45,7 @@ class RelayExecutionTests(unittest.TestCase):
             try:
                 sup.start()
                 self.assertTrue(wait_for(lambda: bool(calls)))
-                self.assertEqual(calls[0]['cwd'], '/config')
+                self.assertEqual(calls[0]['cwd'], '/homeassistant')
             finally:
                 sup.stop()
 
@@ -72,12 +73,11 @@ class RelayExecutionTests(unittest.TestCase):
                               'synthetic-environment', 'First room', 1, 1))
             before = db.read_bytes()
             patches = {'CODEX_HOME': home, 'DATA_ROOT': data, 'CODEX_CONFIG_PATH': home / 'config.toml',
-                       'AUTH_QR_DIR': data / 'qr'}
+                       'OLD_AUTH_QR_DIR': data / 'qr'}
             keys = []
             for name, socket in [('First room', 'one.sock'), ('Other room', 'two.sock')]:
                 with patch.multiple(server, **patches), patch.object(server, 'api_token', return_value='synthetic'), \
-                        patch.object(server, 'task_root', return_value=data / 'tasks'), \
-                        patch.object(server.protected_policy, 'remove_legacy_instructions'):
+                        patch.object(server, 'task_root', return_value=data / 'tasks'):
                     server.ensure_runtime_files()
                 config = tomllib.loads((home / 'config.toml').read_text())
                 self.assertEqual(config['sqlite_home'], str(home))

@@ -10,6 +10,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from test_server import server
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
@@ -23,10 +24,13 @@ class QueueTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {}), ("message_queue", [])):
+        self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {}), ("message_queue", [])):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
+        self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "MESSAGE_QUEUE_FILE", self.root / "queue.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
@@ -167,10 +171,10 @@ class QueueTests(unittest.TestCase):
         self.runner.assert_called_with(chat, "Original request", session_id=self.session_id, reply="Apply it")
         continued = server.tasks[chat]
         self.assertEqual(continued["status"], "queued")
-        self.assertEqual(continued["chat_settings"], settings)
+        self.assertEqual(continued["chat_settings"], {**settings, "fast": None})
         self.assertEqual([turn["message"] for turn in continued["turns"]], ["Original request", "Apply it"])
         self.assertEqual(continued["turns"][0], before["turns"][0])
-        self.assertEqual(continued["turns"][1]["execution_settings"], settings)
+        self.assertEqual(continued["turns"][1]["execution_settings"], {**settings, "fast": False})
         self.assertEqual(server.message_queue, [])
 
     def test_waiting_message_can_be_edited_and_removed(self):
@@ -193,7 +197,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(json.loads(server.MESSAGE_QUEUE_FILE.read_text(encoding="utf-8"))[0]["message"], "First draft, corrected")
         named = self.queue_chat("Message", title="Chosen title")
         self.assertEqual(self.post(f"/queue/{named['queue_id']}", {"message": "Other"}).json["queued_message"]["title"], "Chosen title")
-        with patch.object(server, "atomic_json_write", side_effect=OSError("disk full")):
+        with patch.object(server.task_store, "atomic_json_write", side_effect=OSError("disk full")):
             self.assertEqual(self.post(path, {"message": "Lost"}).status_code, 500)
             self.assertEqual(self.client.delete(path, headers=self.headers).status_code, 500)
         self.assertEqual(server.message_queue[0]["message"], "First draft, corrected")
@@ -227,7 +231,7 @@ class QueueTests(unittest.TestCase):
         with self.client.get(url, headers=self.headers) as served:
             self.assertEqual(served.status_code, 200)
             self.assertEqual(served.mimetype, "image/png")
-        dropped_dir = server.get_task_dir(dropped["task_id"])
+        dropped_dir = server.ATTACHMENTS_ROOT / dropped["task_id"]
         self.assertTrue(dropped_dir.exists())
         self.assertEqual(self.client.delete(f"/queue/{dropped['queue_id']}", headers=self.headers).status_code, 200)
         self.assertFalse(dropped_dir.exists())

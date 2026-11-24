@@ -3,7 +3,6 @@ from datetime import datetime
 import importlib.util
 import json
 from pathlib import Path
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -57,7 +56,13 @@ class ReviewStoreTests(unittest.TestCase):
         self.assertEqual(journal.stat().st_mode & 0o777, 0o600)
         with self.store.connect() as db:
             self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'persist')
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 4)
+
+    def test_a_new_file_has_the_author_chat_and_model_columns_in_the_same_order(self):
+        """The columns that older versions added later are in the table from the start, in the order they were added."""
+        with self.store.connect() as db:
+            columns = [row['name'] for row in db.execute('PRAGMA table_info(schedules)')]
+        self.assertEqual(columns[-3:], ['author', 'chat_id', 'model'])
 
     def test_f6_once_uses_home_assistant_wall_time(self):
         item = scheduling.validate(proposal(spec={'kind':'once','at':'2027-03-02T09:00:00'}), NOW, 'America/Chicago')
@@ -112,15 +117,6 @@ class ReviewStoreTests(unittest.TestCase):
             candidate = next(s for s in self.store.schedules() if not s['approved'])
             with self.assertRaises(ValueError): self.store.action(candidate['id'], 'approve', NOW, candidate['revision'])
             self.assertEqual(len(self.store.schedules()), 4)
-
-    def test_schema_migration_preserves_unattributed_legacy_proposals(self):
-        legacy = Path(self.temp.name)/'old.db'
-        with sqlite3.connect(legacy) as db:
-            db.execute('CREATE TABLE schedules(id TEXT PRIMARY KEY,name TEXT,prompt TEXT,mode TEXT,spec TEXT,approved INTEGER,enabled INTEGER,next_due REAL,updated REAL,revision TEXT)')
-            db.execute('INSERT INTO schedules VALUES(?,?,?,?,?,?,?,?,?,?)', ('old','Old','Do nothing','default',json.dumps({'kind':'interval','seconds':60}),0,0,NOW+60,NOW,'revision'))
-        store = scheduling.Store(legacy)
-        self.assertEqual(store.schedules()[0]['author'], 'owner')
-
 
 class ReviewApiTests(unittest.TestCase):
     setUp = fixtures.SchedulingApiTests.setUp

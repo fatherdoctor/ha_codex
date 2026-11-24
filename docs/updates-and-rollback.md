@@ -77,8 +77,9 @@ checkout of `beta`.
   *automatic* update also takes that backup depends on the Supervisor version in use, so check it on the test
   machine for the version you run before relying on it. The backup is the second way back (below), not the first.
 - The app's backup holds its data folder, including the Codex sign-in (`/data/codex-home`), and leaves out the
-  documentation cache, the data cache and `.ssh` (`backup_exclude` in `config.yaml`). Task logs are under
-  `/config/codex_tasks`, which the Home Assistant configuration backup covers.
+  documentation cache, the data cache, `.ssh`, the GitHub sign-in and the files you attached to a message (`/data/chat_uploads`, kept 7 days) (`backup_exclude` in `config.yaml`). Since 0.4 it also holds the
+  chats and their logs (`/data/codex_tasks`). A version before 0.4 looks for them in `/config/codex_tasks`: after a
+  rollback to one, the chats come back only with the app backup taken before the update.
 
 ## Before a tag: the lab pass
 
@@ -141,6 +142,12 @@ anything (conversations, queue, settings, sign-in) must say so in its changelog 
 `Stored data:`, and say whether older builds still read it. `rollback` stops when a release newer than the target has
 such a bullet; check by hand that the older build copes, then run it again with `--accept-stored-data`. If it does
 not, use the second way.
+
+From 0.6 the app maps Home Assistant's configuration folder at `/homeassistant` instead of `/config`. A rollback to
+0.5 maps `/config` again and works: the chats, backups and the change review keep paths relative to the folder, and
+0.5 ignores the marker of the one-time path scan (`/data/config-path-scan.json`). Text that the owner changed to
+`/homeassistant/...` (workspace instructions, the working folder's notes, scheduled prompts) does not work in 0.5;
+change it back to `/config/...` after the rollback.
 
 ### The second way: restore the backup
 

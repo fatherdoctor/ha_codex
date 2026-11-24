@@ -26,6 +26,7 @@ import test_approvals as approval_tests
 import test_attachments as attachments
 import test_cx_pair_f as admin
 import test_ha_call as ha_calls
+from app_folders import isolated_app_folders
 from test_server import server
 
 SHIPPED = ROOT / "gate" / "requirements.toml"
@@ -128,6 +129,7 @@ class LaunchTests(unittest.TestCase):
     def setUp(self):
         self.setUp_base()
         self.server = server
+        self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
         self.stack.enter_context(patch.object(full_access, "SETTING_PATH", self.root / "full_access.json"))
         (self.root / "etc").mkdir()
         self.stack.enter_context(patch.object(full_access, "REQUIREMENTS_PATH", self.root / "etc" / "requirements.toml"))
@@ -252,7 +254,7 @@ class SessionTests(unittest.TestCase):
         return {"method": method, "params": {
             "threadId": thread, "turnId": turn, "startedAtMs": 1, "reviewId": "review-1", "targetItemId": "item",
             "review": {"status": "inProgress", "riskLevel": None, "userAuthorization": None, "rationale": None, **review},
-            "action": {"type": "command", "source": "shell", "command": "ls", "cwd": "/config"}}}
+            "action": {"type": "command", "source": "shell", "command": "ls", "cwd": "/homeassistant"}}}
 
     def auto_review_session(self):
         settings = {"approvalPolicy": "on-request", "approvalsReviewer": "auto_review"}
@@ -653,14 +655,14 @@ class PageTests(unittest.TestCase):
         start = html.index('id="permissions-dialog"')
         dialog = html[start:html.index("</dialog>", start)]
         modes = [part.split('"', 1)[0] for part in dialog.split('data-mode="')[1:]]
-        self.assertEqual(modes, ["default", "auto-review", "read-only", "full-access"])
+        self.assertEqual(modes, ["default", "auto-review", "full-access", "read-only"])
         self.assertNotIn("Coming", dialog)
         self.assertIn("It does not ask you.", dialog)
         self.assertNotIn("Administrators only", dialog)
 
     def test_the_button_names_each_mode(self):
         script = (ROOT / "web" / "assets" / "studio.js").read_text(encoding="utf-8")
-        for name in ('"auto-review": "Auto-review"', '"full-access": "Full access"'):
+        for name in ('"auto-review": "Approve for me"', '"full-access": "Full access"'):
             self.assertIn(name, script)
 
 

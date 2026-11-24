@@ -22,11 +22,14 @@ class ConversationTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
+        # Listing chats reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", self.root / "data"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.runner = self.stack.enter_context(patch.object(server, "start_background_task"))
         self.client = server.app.test_client()
@@ -111,7 +114,7 @@ class ConversationTests(unittest.TestCase):
         server.tasks.clear()
         server.load_task_index()
         task = self.client.get(f"/tasks/{task_id}", headers=self.headers).json["task"]
-        self.assertEqual(task["chat_settings"], settings)
+        self.assertEqual(task["chat_settings"], {**settings, "fast": None})
         self.assertEqual(self.post(f"/tasks/{task_id}/continue", {"message": "Next"}).status_code, 200)
         session = self.codex_session(task_id, self.session_id)
         self.assertEqual(session.thread_params["model"], "gpt-5.6-luna")
@@ -124,7 +127,8 @@ class ConversationTests(unittest.TestCase):
         options = {"codex_model": "gpt-5.6-sol", "model_reasoning_effort": "high"}
         with patch.object(server, "read_options", return_value=options):
             task_id = self.create()
-            self.assertEqual(server.tasks[task_id]["turns"][0]["execution_settings"], {"model": "gpt-5.6-sol", "reasoning_effort": "high"})
+            self.assertEqual(server.tasks[task_id]["turns"][0]["execution_settings"],
+                             {"model": "gpt-5.6-sol", "reasoning_effort": "high", "fast": False})
             # An option edit after queuing must not change the queued run.
             options["codex_model"] = "gpt-5.6-terra"
             session = self.codex_session(task_id)
@@ -137,7 +141,8 @@ class ConversationTests(unittest.TestCase):
             self.finish(other)
             response = self.post(f"/tasks/{task_id}/continue", {"message": "Reset", "chat_settings": {"model": None, "reasoning_effort": None}})
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(server.tasks[task_id]["turns"][-1]["execution_settings"], {"model": "gpt-5.6-terra", "reasoning_effort": "high"})
+            self.assertEqual(server.tasks[task_id]["turns"][-1]["execution_settings"],
+                             {"model": "gpt-5.6-terra", "reasoning_effort": "high", "fast": False})
             self.assertEqual(options, {"codex_model": "gpt-5.6-terra", "model_reasoning_effort": "high"})
 
     def test_retired_model_continues_on_the_next_model_up(self):
@@ -150,8 +155,8 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(task["chat_settings"], bumped)
         # Home Assistant actions continue a chat without sending its settings.
         self.assertEqual(self.post(f"/tasks/{task_id}/continue", {"message": "Next"}).status_code, 200)
-        self.assertEqual(server.tasks[task_id]["turns"][-1]["execution_settings"], bumped)
-        self.assertEqual(server.tasks[task_id]["chat_settings"], bumped)
+        self.assertEqual(server.tasks[task_id]["turns"][-1]["execution_settings"], {**bumped, "fast": False})
+        self.assertEqual(server.tasks[task_id]["chat_settings"], {**bumped, "fast": None})
         session = self.codex_session(task_id, self.session_id)
         self.assertEqual(session.thread_params["model"], "gpt-5.6-sol")
         self.finish(task_id)
@@ -163,7 +168,8 @@ class ConversationTests(unittest.TestCase):
         # The add-on option keeps accepting the old model, and new chats run on the next one up.
         with patch.object(server, "read_options", return_value={"codex_model": "gpt-5.5", "model_reasoning_effort": "high"}):
             other = self.create("Separate chat")
-            self.assertEqual(server.tasks[other]["turns"][0]["execution_settings"], {"model": "gpt-5.6-sol", "reasoning_effort": "high"})
+            self.assertEqual(server.tasks[other]["turns"][0]["execution_settings"],
+                             {"model": "gpt-5.6-sol", "reasoning_effort": "high", "fast": False})
             catalog = self.client.get("/chat-options", headers=self.headers).json
             self.assertEqual(catalog["defaults"]["model"], "gpt-5.6-sol")
             self.assertEqual(catalog["default_efforts"], ["low", "medium", "high", "xhigh", "max", "ultra"])
@@ -223,7 +229,7 @@ class ConversationTests(unittest.TestCase):
         task_id = self.create()
         self.assertEqual(self.post(f"/tasks/{task_id}/settings", {"chat_settings": {}}).status_code, 409)
         catalog = self.client.get("/chat-options", headers=self.headers).json
-        self.assertEqual(len(catalog["models"]), 8)
+        self.assertEqual(len(catalog["models"]), 9)
         efforts = {model["id"]: model["efforts"] for model in catalog["models"]}
         self.assertEqual(efforts["gpt-6.1-sol"], ["low", "medium", "high", "xhigh", "max", "ultra"])
         self.assertEqual(efforts["gpt-6.1-terra"], ["low", "medium", "high", "xhigh", "max", "ultra"])
@@ -245,7 +251,8 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(catalog["default_model"], server.CLI_DEFAULT_MODEL)
         self.assertEqual(catalog["default_efforts"], levels)
         # A model the worker has no entry for gets the common levels.
-        for model, highest in (("gpt-6-luna", "max"), ("gpt-7-nova", "xhigh")):
+        # gpt-6-luna runs on Fast by default (the built-in list); the worker knows nothing of gpt-7-nova's tiers.
+        for model, highest, fast in (("gpt-6-luna", "max", True), ("gpt-7-nova", "xhigh", None)):
             with self.subTest(model=model), patch.dict(server.usage_state, {"_default_model": model}):
                 catalog = self.client.get("/chat-options", headers=self.headers).json
                 self.assertEqual(catalog["default_model"], model)
@@ -262,7 +269,7 @@ class ConversationTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 task_id = response.json["task_id"]
                 self.assertEqual(server.tasks[task_id]["turns"][0]["execution_settings"],
-                                 {"model": "default", "reasoning_effort": highest})
+                                 {"model": "default", "reasoning_effort": highest, "fast": fast})
                 self.assertNotIn("model", self.codex_session(task_id).thread_params)
                 self.finish(task_id)
         # A model named in the add-on options is the one, whatever the CLI would pick.
@@ -278,7 +285,7 @@ class ConversationTests(unittest.TestCase):
         task_id = self.create()
         self.finish(task_id)
         before = copy.deepcopy(server.tasks[task_id])
-        with patch.object(server, "atomic_json_write", side_effect=OSError("disk full")):
+        with patch.object(server.task_store, "atomic_json_write", side_effect=OSError("disk full")):
             response = self.post(f"/tasks/{task_id}/settings", {"chat_settings": {"model": "gpt-6-astra"}})
         self.assertEqual(response.status_code, 500)
         self.assertEqual(server.tasks[task_id], before)
@@ -525,7 +532,7 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(task["title"], "x" * 200)
         summary = self.client.get("/tasks?summary=true", headers=self.headers).json["tasks"][0]
         self.assertEqual(summary["title"], "x" * 200)
-        with patch.object(server, "atomic_json_write", side_effect=OSError("disk full")):
+        with patch.object(server.task_store, "atomic_json_write", side_effect=OSError("disk full")):
             self.assertEqual(self.post(f"/tasks/{task_id}/title", {"title": "Lost"}).status_code, 500)
             self.assertEqual(self.post(f"/tasks/{task_id}/pin", {"pinned": True}).status_code, 500)
         self.assertEqual(server.tasks[task_id]["title"], "x" * 200)
@@ -573,7 +580,7 @@ class ConversationTests(unittest.TestCase):
         self.assertIn(b'assets/chat.js', response.data)
         # The Markdown parser is bundled, so the chat never loads a script from another server.
         scripts = re.findall(rb'<script src="([^"]+)"', response.data)
-        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js"])
+        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js", b"assets/update_banner.js"])
         for name in ("text-size.js", "chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
             with self.client.get("/assets/" + name) as asset:
                 self.assertEqual(asset.status_code, 200)

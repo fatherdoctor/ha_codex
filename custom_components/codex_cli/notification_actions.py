@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import Event, HomeAssistant, callback
 
 from .api import CodexCliApiClient, CodexCliApiError
+from .const import TASK_ID_PATTERN
 
 if TYPE_CHECKING:
     from .coordinator import CodexCliCoordinator
@@ -19,7 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 # The companion apps fire this when a notification button is tapped.
 EVENT_NOTIFICATION_ACTION = "mobile_app_notification_action"
 # Written by the worker: the choice's position, the turn that asked, and the task. Keep the two in step.
-CHOICE_ACTION_RE = re.compile(r"CODEX_CLI_CHOICE_(\d{1,2})_([0-9a-f]{32})_([A-Za-z0-9][A-Za-z0-9._-]{0,127})")
+CHOICE_ACTION_RE = re.compile(r"CODEX_CLI_CHOICE_(\d{1,2})_([0-9a-f]{32})_(" + TASK_ID_PATTERN + ")")
 
 
 def parse_choice_action(action: Any) -> tuple[str, str, int] | None:

@@ -30,10 +30,15 @@ class Worker:
         with self.worker.lock:
             return copy.deepcopy(self.worker.tasks.get(task_id))
 
-    def submit(self, task_id, prompt, mode, name, schedule_id, model=None):
-        """Use the normal task path; metadata is durable before the runner starts.
+    def submit(self, task_id, prompt, mode, name, schedule_id, model=None, chat_id=''):
+        """Start a run through the normal task path; its metadata is durable before the runner starts.
 
-        model is the schedule's own model, or None to follow the add-on's.
+        model is the schedule's own model, or None to follow the add-on's. chat_id
+        is the chat the schedule was made in: the run continues that chat while it
+        can (see continuable), else it starts the new chat task_id. The run keeps
+        the schedule's mode and model, never the chat's own, so the chat's saved
+        settings stay as they are for the owner's next message. Returns
+        scheduling.Placed.
         """
         w = self.worker
         options = w.read_options()
@@ -47,16 +52,50 @@ class Worker:
             if model:
                 settings['model'] = model
             turn = w.new_turn(prompt)
-            turn['task_source'] = 'schedule'
+            # The exchange carries its own source and mode, so a run in the owner's chat is unattended
+            # only for this exchange (server.unattended_mode).
+            turn.update(task_source='schedule', background_mode=mode)
             turn['execution_settings'] = w.resolve_chat_settings(settings, options)
+            source = self.continuable(chat_id)
+            if source is not None:
+                self.continue_chat(chat_id, source, turn)
+                return scheduling.Placed(chat_id, turn['turn_id'])
             w.active_task_runners.add(task_id)
             try:
                 w.open_task(task_id, name, prompt, settings, turn)
-                w.update_task(task_id, background_mode=mode, schedule_id=schedule_id, task_source='schedule')
+                w.update_task(task_id, background_mode=mode, schedule_id=schedule_id, task_source='schedule',
+                              unread=True)
                 w.start_background_task(task_id, prompt)
             except Exception as exc:
                 w.record_background_start_failure(task_id, exc)
                 raise
+            return scheduling.Placed(task_id, turn['turn_id'])
+
+    def continuable(self, chat_id):
+        """Return the saved chat a run may continue, or None for a new chat; call with the lock held.
+
+        None when no chat is named, or the chat is deleted, archived, still has an
+        exchange that has not ended, or has no Codex session to resume.
+        """
+        w = self.worker
+        task = w.tasks.get(chat_id) if chat_id else None
+        if task is None or task.get('archived') or task.get('status') not in w.CONTINUABLE_STATUSES:
+            return None
+        session_id = str(task.get('session_id') or '')
+        return task if session_id and w.session_available(session_id) else None
+
+    def continue_chat(self, chat_id, task, turn):
+        """Add the run to the chat as its next exchange, mark the chat unread and start it; call with the lock held."""
+        w = self.worker
+        w.active_task_runners.add(chat_id)
+        try:
+            w.open_turn(chat_id, task, turn, task.get('chat_settings') or dict(w.DEFAULT_CHAT_SETTINGS))
+            w.update_task(chat_id, unread=True)
+            w.start_background_task(chat_id, str(task.get('prompt') or ''), session_id=task['session_id'],
+                                    reply=turn['message'])
+        except Exception as exc:
+            w.record_background_start_failure(chat_id, exc)
+            raise
 
 
 PAGE_LIMIT = 20
@@ -73,7 +112,7 @@ def page_arguments(operation, args):
     """
     if set(args) - {'offset', 'limit'}:
         raise ValueError(f'{operation} accepts only offset and limit.')
-    maximum = scheduling.MAX_SCHEDULES + scheduling.MAX_PROPOSALS
+    maximum = scheduling.LISTED
     offset = args.get('offset', 0)
     limit = args.get('limit', DEFAULT_PAGE_LIMIT)
     # bool is a subclass of int; true and false are not page numbers.
@@ -82,6 +121,21 @@ def page_arguments(operation, args):
     if type(limit) is not int:
         raise ValueError(f'limit must be a whole number; up to {PAGE_LIMIT} items are returned per page.')
     return offset, min(max(limit, 1), PAGE_LIMIT)
+
+
+def proposal_answer(item, zone):
+    """Tell Codex what happens to its proposal, with the next run in the home's time zone.
+
+    Codex repeats this answer to the owner, so the time is written out in the
+    Home Assistant time zone (a reply once gave the owner a UTC time).
+    """
+    if item['approved']:
+        message = 'This one-time wakeup is on. It runs in this chat at next_run. Tell the owner that time as written.'
+    else:
+        message = ('Waiting for owner approval on the Codex page. '
+                   'Tell the owner times in the Home Assistant time zone, as next_run shows.')
+    return {'ok': True, 'schedule_id': item['id'], 'approved': item['approved'], 'enabled': item['enabled'],
+            'next_run': scheduling.local_text(item['next_due'], zone), 'timezone': zone, 'message': message}
 
 
 class Service:
@@ -134,12 +188,12 @@ class Service:
             if not isinstance(args, dict):
                 raise ValueError('Arguments must be an object.')
             if operation == 'propose_schedule':
-                item = store.save(args, owner=False, author='codex', now=time.time())
-                return {'ok': True, 'schedule_id': item['id'], 'approved': False, 'enabled': False,
-                        'message': 'Waiting for owner approval on the Codex page.'}
+                item = store.save(args, owner=False, author='codex', now=time.time(), made_in=task_id)
+                return proposal_answer(item, store.timezone)
             if operation == 'list_schedules':
                 offset, limit = page_arguments(operation, args)
-                rows = store.schedules()
+                # Spent wakeups past the first LISTED rows are left out; every active schedule and proposal is in.
+                rows = store.schedules()[:scheduling.LISTED]
                 page = rows[offset:offset + limit]
                 for row in page:
                     for key in scheduling.OWNER_FIELDS:

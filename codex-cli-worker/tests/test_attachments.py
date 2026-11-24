@@ -3,18 +3,21 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import struct
 import tempfile
 import unittest
 import zlib
 from contextlib import ExitStack
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
 from test_server import server
 
 SESSION_ID = "019fc242-910a-7c92-a17d-54c014e19fc4"
+# The real name of the upload folder, read before any test patches ATTACHMENTS_ROOT to a temporary folder.
+UPLOAD_FOLDER_NAME = server.ATTACHMENTS_ROOT.name
 
 
 def png_bytes(width=4, height=3, shade=200):
@@ -46,12 +49,16 @@ class AttachmentTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
+        self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.root / "config"))
+        # Listing chats reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", self.root / "data"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "start_background_task"))
         self.stack.enter_context(patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}))
@@ -306,6 +313,121 @@ class AttachmentTests(unittest.TestCase):
         """Build one attachment entry for a message request."""
         return {"name": name, "data": base64.b64encode(data).decode()}
 
+    def test_uploads_live_outside_the_task_folder(self):
+        """A photo is stored under the app's data folder, never under the task folder in /homeassistant."""
+        response = self.client.post("/tasks", json={"prompt": "Look", "attachments": [self.upload("a.png", png_bytes())]},
+                                    headers=self.headers)
+        task_id = response.json["task_id"]
+        item = server.tasks[task_id]["turns"][0]["prompt_attachments"][0]
+        stored = server.ATTACHMENTS_ROOT / task_id / item["path"]
+        self.assertTrue(stored.is_file())
+        self.assertFalse(stored.is_relative_to(server.get_task_dir(task_id)))
+        self.assertFalse(list(server.get_task_dir(task_id).rglob("*.png")))
+        server.tasks[task_id]["status"] = "completed"
+        server.active_task_runners.discard(task_id)
+        self.assertEqual(self.client.delete(f"/tasks/{task_id}", headers=self.headers).status_code, 200)
+        self.assertFalse((server.ATTACHMENTS_ROOT / task_id).exists())
+
+    def test_cleanup_removes_only_uploads_older_than_seven_days(self):
+        """The cleanup age is 7 days by file time; newer files and the folder tree stay."""
+        old = server.ATTACHMENTS_ROOT / "t1" / "turn1" / "old.png"
+        new = server.ATTACHMENTS_ROOT / "t1" / "turn2" / "new.png"
+        for path in (old, new):
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"x")
+        now = 10_000_000.0
+        os.utime(old, (now - 7 * 86400 - 60,) * 2)
+        os.utime(new, (now - 6 * 86400,) * 2)
+        self.assertEqual(server.cleanup_attachments(now), 1)
+        self.assertFalse(old.exists())
+        # The emptied folder was just changed, so the next run removes it.
+        os.utime(old.parent, (now - 7200,) * 2)
+        self.assertEqual(server.cleanup_attachments(now), 0)
+        self.assertFalse(old.parent.exists())
+        self.assertTrue(new.is_file())
+
+    def test_cleanup_keeps_the_empty_folder_of_a_new_upload(self):
+        """A folder just made for an upload, with its file not yet written, is not removed."""
+        folder = server.ATTACHMENTS_ROOT / "t1" / "turn1"
+        folder.mkdir(parents=True)
+        self.assertEqual(server.cleanup_attachments(), 0)
+        self.assertTrue(folder.is_dir())
+
+    def legacy_upload(self, task_id):
+        """Put an upload where earlier versions kept it, under the task folder, and record it on a new chat."""
+        task_dir = server.get_task_dir(task_id)
+        legacy = task_dir / "turns" / "turn1" / "attachments" / ("b" * 32 + ".png")
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(png_bytes())
+        record = {"attachment_id": "b" * 32, "kind": "image", "origin": "user",
+                  "path": legacy.relative_to(task_dir).as_posix()}
+        server.tasks[task_id] = {"task_id": task_id, "turns": [{"turn_id": "turn1", "prompt_attachments": [record]}]}
+        return legacy, record
+
+    def test_a_failed_move_is_tried_again_at_the_next_start(self):
+        """When a file does not move, the record keeps its old path, and the next start moves it."""
+        legacy, record = self.legacy_upload("a" * 32)
+        with patch.object(server.shutil, "move", side_effect=OSError("disk full")):
+            self.assertEqual(server.migrate_attachments(), 0)
+        self.assertTrue(legacy.is_file())
+        self.assertNotIn("store", record)
+        self.assertEqual(server.migrate_attachments(), 1)
+        self.assertEqual(record["store"], "data")
+
+    def test_a_chat_that_appears_at_a_later_start_gets_its_uploads_moved(self):
+        """A chat that moves out of /homeassistant only at the second start still has its old uploads moved then."""
+        self.assertEqual(server.migrate_attachments(), 0)
+        legacy, record = self.legacy_upload("c" * 32)
+        self.assertEqual(server.migrate_attachments(), 1)
+        self.assertFalse(legacy.exists())
+        self.assertTrue((server.ATTACHMENTS_ROOT / ("c" * 32) / record["path"]).is_file())
+
+    def test_removed_upload_answers_with_the_removal_message(self):
+        """A chat whose upload was cleaned up gets 410 and the plain message, not a broken image."""
+        response = self.client.post("/tasks", json={"prompt": "Look", "attachments": [self.upload("a.png", png_bytes())]},
+                                    headers=self.headers)
+        task_id = response.json["task_id"]
+        item = server.tasks[task_id]["turns"][0]["prompt_attachments"][0]
+        (server.ATTACHMENTS_ROOT / task_id / item["path"]).unlink()
+        gone = self.client.get(item["url"], headers=self.headers)
+        self.assertEqual(gone.status_code, 410)
+        self.assertEqual(gone.json["error"], "attachment removed after 7 days")
+
+    def test_old_uploads_move_out_of_the_task_folder_once(self):
+        """An upload that an earlier version kept under the task folder moves once, and the record follows."""
+        task_id = "a" * 32
+        legacy, record = self.legacy_upload(task_id)
+        self.assertEqual(server.migrate_attachments(), 1)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(record["store"], "data")
+        self.assertTrue((server.ATTACHMENTS_ROOT / task_id / record["path"]).is_file())
+        self.assertEqual(server.migrate_attachments(), 0)
+
+    def test_the_backup_leaves_out_uploads_only(self):
+        """Each backup_exclude pattern, applied as the Supervisor applies it, leaves out the uploads and nothing else.
+
+        The Supervisor tests every path it archives with PurePath.match, which matches a relative pattern from the
+        right of the full path, and it does not enter a folder it leaves out. So a path is left out when it or any
+        folder above it matches a pattern. The data path below is made up; only the part from /data on is the app's.
+        """
+        config = server.yaml.safe_load(Path(server.__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        patterns = config["backup_exclude"]
+        data = PurePosixPath("/mnt/data/supervisor/apps/data/local_codex_cli")
+        uploads = data / UPLOAD_FOLDER_NAME
+
+        def left_out(path):
+            """True when the Supervisor would leave this path out of the app backup."""
+            folders = [path, *path.parents]
+            return any(folder.match(pattern) for folder in folders if folder.is_relative_to(data) for pattern in patterns)
+
+        chat = data / "codex_tasks" / ("a" * 32)
+        self.assertTrue(left_out(uploads))
+        self.assertTrue(left_out(uploads / ("a" * 32) / "turn1" / ("b" * 32 + ".png")))
+        self.assertFalse(left_out(chat / "turns" / "turn1" / "attachments" / ("c" * 32 + ".png")))
+        self.assertFalse(left_out(chat / "turns" / "turn1" / "attachments"))
+        self.assertFalse(left_out(chat / "codex.log"))
+        self.assertFalse(left_out(chat / "task.json"))
+
     def test_attached_images_are_stored_served_and_passed_to_codex(self):
         """Images attached to a message stay with the exchange and reach Codex as localImage inputs."""
         png, jpeg = png_bytes(), b"\xff\xd8\xff\xe0" + b"\x00" * 64
@@ -322,9 +444,10 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual([(item["name"], item["mime_type"], item["origin"]) for item in sent],
                          [("Screen shot.PNG", "image/png", "user"), ("photo.jpg", "image/jpeg", "user")])
         for item in sent:
-            path = server.get_task_dir(task_id) / item["path"]
+            path = server.ATTACHMENTS_ROOT / task_id / item["path"]
             self.assertTrue(path.is_file())
-            self.assertEqual(path.parent.parent.name, turn["turn_id"])
+            self.assertEqual(path.parent.name, turn["turn_id"])
+            self.assertEqual(item["store"], "data")
         # Served like generated images, and reported by the task API.
         served = self.client.get(f"/tasks/{task_id}/attachments/{sent[0]['attachment_id']}", headers=self.headers)
         self.assertEqual((served.status_code, served.mimetype, served.data), (200, "image/png", png))
@@ -338,7 +461,7 @@ class AttachmentTests(unittest.TestCase):
         self.assertIn("attached 2 image(s) to this message: Screen shot.PNG, photo.jpg", info["attachments"])
         options = {"codex_sandbox": "workspace-write"}
         session = server.create_approval_session(task_id, StubAppServer(SESSION_ID), "Fix the card", Path("final"), None, {}, options)
-        paths = [str((server.get_task_dir(task_id) / item["path"]).resolve()) for item in sent]
+        paths = [str((server.ATTACHMENTS_ROOT / task_id / item["path"]).resolve()) for item in sent]
         self.assertEqual(session.turn_params["input"][1:], [{"type": "localImage", "path": path} for path in paths])
         # A continued exchange supplies its own images.
         self.run_codex(task_id)
@@ -353,7 +476,7 @@ class AttachmentTests(unittest.TestCase):
         self.assertEqual(server.tasks[task_id]["turns"][0]["prompt_attachments"], sent)
         self.assertIn("attached 1 image(s) to this message: second.png", server.exchange_info(task_id, None)["attachments"])
         session = server.create_approval_session(task_id, StubAppServer(SESSION_ID), "Follow up", Path("final"), SESSION_ID, {}, options)
-        second_path = str((server.get_task_dir(task_id) / second[0]["path"]).resolve())
+        second_path = str((server.ATTACHMENTS_ROOT / task_id / second[0]["path"]).resolve())
         self.assertEqual(session.thread_params["threadId"], SESSION_ID)
         self.assertEqual(session.turn_params["input"][1:], [{"type": "localImage", "path": second_path}])
         # Uploads survive a worker restart and both kinds resolve through find_attachment.

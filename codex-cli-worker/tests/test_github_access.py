@@ -69,12 +69,16 @@ class FakeHttp:
         return self.posts.pop(0)
 
 
+# GitHub's Configure page of the example installation, where its owner adds repositories (invented id).
+CONFIGURE_URL = "https://github.com/settings/installations/7"
+
+
 def app_answers(repos=(REPO,), permissions=None, admin=True, push=True, user_status=200):
     """Canned GitHub answers for an App user token. The owner owns the repositories, so admin is true (F2)."""
     return {
         gh.API + "/user": Response(user_status, {"login": "example-owner", "id": 1}),
         gh.API + "/user/installations": Response(200, {"installations": [
-            {"id": 7, "account": {"login": "example-owner"},
+            {"id": 7, "account": {"login": "example-owner"}, "html_url": CONFIGURE_URL,
              "permissions": permissions if permissions is not None else {"contents": "write", "metadata": "read"}}]}),
         gh.API + "/user/installations/7/repositories": Response(200, {"repositories": [
             {"full_name": name, "private": True, "permissions": {"admin": admin, "push": push, "pull": True}}
@@ -172,6 +176,20 @@ class DeviceFlowTests(ServiceCase):
         self.assertNotIn(APP_TOKEN, json.dumps(self.service.status()))
         posted = [call for call in self.http.calls if call[0] == "POST"]
         self.assertTrue(all("client_secret" not in call[2] for call in posted))
+
+    def test_status_links_to_the_installations_configure_page(self):
+        """'1 repository' is the App installation's set: the page links to GitHub's page that adds more."""
+        self.flow(Response(200, {"access_token": APP_TOKEN, "token_type": "bearer"})).run()
+        self.assertEqual(self.service.status()["add_repositories_url"], CONFIGURE_URL)
+
+    def test_only_a_github_address_becomes_the_add_repositories_link(self):
+        for url in ("http://github.com/settings/installations/7", "https://example.com/x", "javascript:alert(1)",
+                    None, 7, "https://github.com/" + "a" * 300):
+            with self.subTest(url=url):
+                self.assertEqual(gh.configure_url({"html_url": url}), "")
+                self.assertEqual(gh.add_repositories_url({"installations": [{"configure_url": url}]}), "")
+        self.assertEqual(gh.add_repositories_url({"installations": [{"configure_url": ""}, {"configure_url": CONFIGURE_URL}]}),
+                         CONFIGURE_URL)
 
     def test_status_gives_the_seconds_left_on_a_waiting_code_only(self):
         """The page counts down from the worker's clock; an ended flow has no countdown."""
@@ -300,6 +318,8 @@ class TokenFallbackTests(ServiceCase):
         self.assertEqual(status["expires_at"], "2026-12-20T12:00:00+00:00")
         self.assertEqual(status["revoke_url"], gh.TOKEN_REVOKE_URL)
         self.assertNotIn(PAT, json.dumps(status) + "\n".join(self.logs))
+        # A token reaches its one repository by design, so the page offers no Add repositories link.
+        self.assertEqual(status["add_repositories_url"], "")
 
     def test_a_token_ends_the_page_message_of_an_earlier_app_sign_in(self):
         """Astro F2: a failed App sign-in no longer shows once a token connected; a waiting one stays."""
@@ -1019,15 +1039,15 @@ class DispatchTests(ServiceCase):
         self.service.runner = Runner()
         self.assertFalse(hasattr(self.service, "read_only"))
         for operation in ("fetch", "pull", "push"):
-            answer = self.service.answer(json.dumps(self.payload(operation, path="/config")).encode())
+            answer = self.service.answer(json.dumps(self.payload(operation, path="/homeassistant")).encode())
             self.assertTrue(answer["ok"], answer)
-        self.assertEqual(calls, [("fetch", "/config"), ("pull", "/config"), ("push", "/config")])
+        self.assertEqual(calls, [("fetch", "/homeassistant"), ("pull", "/homeassistant"), ("push", "/homeassistant")])
 
     def test_no_reply_ever_holds_the_token(self):
         """F9: the socket has no operation that returns the credential."""
         self.connect_app()
         replies = [self.service.answer(json.dumps(self.payload(op, **args)).encode()) for op, args in (
-            ("repos", {}), ("fetch", {"path": "/nowhere"}), ("push", {"path": "/config", "branch": "+main"}),
+            ("repos", {}), ("fetch", {"path": "/nowhere"}), ("push", {"path": "/homeassistant", "branch": "+main"}),
             ("token", {}), ("credential", {}), ("repos", {"path": "x"}))]
         replies.append(self.service.answer(b"not json"))
         self.assertNotIn(APP_TOKEN, json.dumps(replies))

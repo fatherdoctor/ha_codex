@@ -11,6 +11,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from typing import NamedTuple
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -30,6 +31,12 @@ CHAT_ID = re.compile(r'(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127})?')
 MODEL_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}')
 class Busy(ValueError):
     pass
+
+
+class Placed(NamedTuple):
+    """Where the worker started a run: the chat (task id) and the exchange (turn id) in it."""
+    task_id: str
+    turn_id: str
 
 
 ACTIVE = ('reserved', 'queued', 'running', 'waiting_for_approval', 'waiting_for_input')
@@ -110,6 +117,38 @@ def next_due(spec, after, zone='UTC'):
     raise ValueError('Cron has no occurrence in the next 366 days.')
 
 
+def starts_approved(owner, spec):
+    """Return whether a schedule runs without the owner's approval.
+
+    The owner's own schedules run as saved. A one-time wakeup that Codex
+    proposes runs once, at its time, as the next message in the chat it came
+    from, and that run asks for permission like any other. A repeating proposal
+    waits for the owner, because it would go on running by itself.
+    """
+    return owner or spec['kind'] == 'once'
+
+
+# A one-time schedule that ran is off with no next run; it cannot run again until the owner edits it, so it does
+# not use up a place under MAX_SCHEDULES (otherwise every wakeup Codex ever set would fill the owner's room).
+SPENT = "enabled=0 AND next_due IS NULL AND json_extract(spec, '$.kind')='once'"
+# Codex's list_schedules pages end here. Rows that are not spent are at most this many (MAX_SCHEDULES approved
+# plus MAX_PROPOSALS), and Store.schedules() puts them first, so spent history can never push one past the end.
+LISTED = MAX_SCHEDULES + MAX_PROPOSALS
+
+
+def counted(db, approved, schedule_id=''):
+    """Return how many schedules hold a place under the limit of their kind (approved or proposals)."""
+    return db.execute(f'SELECT count(*) FROM schedules WHERE approved=? AND id!=? AND NOT ({SPENT})',
+                      (approved, schedule_id)).fetchone()[0]
+
+
+def local_text(stamp, zone):
+    """Say a time in the home's time zone, for example 'Tuesday, November 24, 2026 at 6:50 PM CST'."""
+    moment = datetime.fromtimestamp(stamp, ZoneInfo(zone))
+    hour = moment.hour % 12 or 12
+    return f'{moment:%A, %B} {moment.day}, {moment.year} at {hour}:{moment:%M %p %Z}'
+
+
 def owner_fields(payload):
     """Return the chat and model an owner's request names; a field left out is left out.
 
@@ -176,6 +215,46 @@ def validate(payload, now, zone="UTC", *, owner=False):
     return value
 
 
+# The run log. task_id is the chat the run used: a run of a schedule made in a chat continues that chat, so many
+# runs can share one. turn_id is the run's own exchange in it ('' for a run saved before version 4).
+RUNS_COLUMNS = """
+                    id TEXT PRIMARY KEY, schedule_id TEXT, task_id TEXT NOT NULL,
+                    due REAL NOT NULL, created REAL NOT NULL, status TEXT NOT NULL,
+                    error TEXT NOT NULL DEFAULT '', turn_id TEXT NOT NULL DEFAULT ''"""
+
+
+def upgrade_runs(db):
+    """Upgrade a run log of schema version 3 or earlier (0.4 and before) to version 4.
+
+    Version 3 held task_id UNIQUE, one new chat per run. SQLite cannot drop that
+    constraint in place, so the table is copied once into the version 4 shape.
+    A version 3 worker after a rollback still reads and writes the new table.
+    """
+    if 'turn_id' in {row['name'] for row in db.execute('PRAGMA table_info(runs)')}:
+        return
+    db.execute('ALTER TABLE runs RENAME TO runs_version_3')
+    db.execute(f'CREATE TABLE runs ({RUNS_COLUMNS})')
+    db.execute('INSERT INTO runs(id,schedule_id,task_id,due,created,status,error) '
+               'SELECT id,schedule_id,task_id,due,created,status,error FROM runs_version_3')
+    db.execute('DROP TABLE runs_version_3')
+
+
+def run_status(task, turn_id):
+    """Return a run's status as its chat records it.
+
+    A run that later messages followed has ended: its exchange keeps its own
+    outcome, and one the owner answered or moved past counts as completed.
+    Otherwise (the run is the current exchange, or the chat lost its exchange
+    list) the chat's status is the run's.
+    """
+    turn = next((item for item in task.get('turns') or [] if item.get('turn_id') == turn_id), None) if turn_id else None
+    if turn is not None and task.get('current_turn_id') != turn_id:
+        status = turn.get('status', 'completed')
+        return 'completed' if status in ACTIVE else status
+    pending = any(a.get('status') == 'pending' for a in task.get('approvals') or [])
+    return 'waiting_for_approval' if pending else task.get('status', 'interrupted')
+
+
 class Store:
     """Transactions protect occurrence reservation and owner approval from concurrent edits."""
     def __init__(self, path, zone="UTC"):
@@ -192,29 +271,22 @@ class Store:
                 CREATE TABLE IF NOT EXISTS schedules (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
                     mode TEXT NOT NULL, spec TEXT NOT NULL, approved INTEGER NOT NULL,
-                    enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS runs (
-                    id TEXT PRIMARY KEY, schedule_id TEXT, task_id TEXT UNIQUE NOT NULL,
-                    due REAL NOT NULL, created REAL NOT NULL, status TEXT NOT NULL,
-                    error TEXT NOT NULL DEFAULT '');
+                    enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL,
+                    author TEXT NOT NULL DEFAULT 'owner', chat_id TEXT NOT NULL DEFAULT '', model TEXT);
+                CREATE TABLE IF NOT EXISTS runs ({RUNS_COLUMNS});
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            '''
+            '''.replace('{RUNS_COLUMNS}', RUNS_COLUMNS)
             for statement in schema.split(';'):
                 if statement.strip():
                     db.execute(statement)
-            columns = {row['name'] for row in db.execute('PRAGMA table_info(schedules)')}
-            if 'author' not in columns:
-                db.execute("ALTER TABLE schedules ADD COLUMN author TEXT NOT NULL DEFAULT 'owner'")
-            # Older schedules belong to no chat and follow the add-on's model.
-            if 'chat_id' not in columns:
-                db.execute("ALTER TABLE schedules ADD COLUMN chat_id TEXT NOT NULL DEFAULT ''")
-            if 'model' not in columns:
-                db.execute('ALTER TABLE schedules ADD COLUMN model TEXT')
+            # The author, chat_id and model columns are in the table from the start. A schedules table made
+            # before 0.3.6 without them is not upgraded here (only test installs ever held one).
             # A file from version 0.3 or earlier also holds the tables of the lead agent channel and the
             # mailbox (mailbox, mailbox_reads, mailbox_deliveries, mailbox_threads, mail_usage, lead_pending,
             # lead_threads) and the lead token's hash in settings. Nothing reads them any more. They are
             # left in place, so an older version still finds its messages after a rollback.
-            db.execute('PRAGMA user_version=3')
+            upgrade_runs(db)
+            db.execute('PRAGMA user_version=4')
         if zone is not None:
             self.set_timezone(zone, time.time())
 
@@ -254,11 +326,20 @@ class Store:
         return value
 
     def schedules(self):
+        """Return every schedule: active ones and proposals first, then spent one-time wakeups, newest first in each."""
         with self.connect() as db:
-            return [self.schedule(row) for row in db.execute('SELECT * FROM schedules ORDER BY updated DESC, id')]
+            return [self.schedule(row) for row in db.execute(f'SELECT * FROM schedules ORDER BY ({SPENT}), updated DESC, id')]
 
-    def save(self, payload, *, owner, now, schedule_id=None, author=None):
+    def save(self, payload, *, owner, now, schedule_id=None, author=None, made_in=None):
+        """Save a schedule; made_in is the chat a Codex proposal came from.
+
+        The worker sets made_in from the exchange that sent the proposal, never
+        from Codex's arguments, so the run of a proposal continues that chat as
+        a schedule the owner makes in a chat does.
+        """
         value = validate(payload, now, self.timezone, owner=owner)
+        if made_in is not None:
+            value['chat_id'] = made_in
         author = 'owner' if owner else author
         if author not in ('owner', 'codex'):
             raise ValueError('Invalid schedule author.')
@@ -269,11 +350,10 @@ class Store:
             old = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone() if schedule_id else None
             if schedule_id and old is None:
                 raise LookupError('Schedule not found.')
-            approved = int(owner)
-            cap = MAX_SCHEDULES if owner else MAX_PROPOSALS
-            count = db.execute('SELECT count(*) FROM schedules WHERE approved=? AND id!=?', (approved, schedule_id or '')).fetchone()[0]
-            if count >= cap:
-                raise ValueError('Approved schedule limit reached.' if owner else 'Proposal limit reached.')
+            approved = int(starts_approved(owner, value['spec']))
+            cap = MAX_SCHEDULES if approved else MAX_PROPOSALS
+            if counted(db, approved, schedule_id or '') >= cap:
+                raise ValueError('Approved schedule limit reached.' if approved else 'Proposal limit reached.')
             schedule_id = schedule_id or uuid.uuid4().hex
             # An edit that does not name the chat or the model keeps the saved one.
             chat_id = value.get('chat_id', old['chat_id'] if old else '')
@@ -294,7 +374,7 @@ class Store:
                 raise ValueError('Unknown schedule action.')
             if action == 'approve' and revision != row['revision']:
                 raise ValueError('This proposal changed. Refresh and review it before approving.')
-            if action == 'approve' and not row['approved'] and db.execute('SELECT count(*) FROM schedules WHERE approved=1').fetchone()[0] >= MAX_SCHEDULES:
+            if action == 'approve' and not row['approved'] and counted(db, 1) >= MAX_SCHEDULES:
                 raise ValueError('Approved schedule limit reached.')
             approved = bool(row['approved']) or action == 'approve'
             if action == 'resume' and not approved:
@@ -340,6 +420,17 @@ class Store:
                        (schedule['next_due'], schedule['id'], schedule['revision']))
             db.execute("UPDATE runs SET status='deferred',error='Worker became busy; occurrence remains due.' WHERE id=?", (run['id'],))
 
+    def started(self, run_id, placed):
+        """Record the chat and exchange the worker started a reserved run in."""
+        with self.connect() as db:
+            db.execute("UPDATE runs SET task_id=?,turn_id=?,status='queued' WHERE id=?",
+                       (placed.task_id, placed.turn_id, run_id))
+
+    def follow_chat(self, schedule_id, old_chat, new_chat):
+        """Move a schedule to the chat that replaced its own, unless the owner changed the chat meanwhile."""
+        with self.connect() as db:
+            db.execute('UPDATE schedules SET chat_id=? WHERE id=? AND chat_id=?', (new_chat, schedule_id, old_chat))
+
     def finish(self, run_id, status, error=''):
         with self.connect() as db:
             db.execute('UPDATE runs SET status=?,error=? WHERE id=?', (status, error[:500], run_id))
@@ -364,15 +455,20 @@ class Engine:
                 if task is None:
                     self.store.finish(run['id'], 'interrupted', 'Worker restarted before this task was saved; not retried.')
                 else:
-                    pending = any(a.get('status') == 'pending' for a in task.get('approvals') or [])
-                    self.store.finish(run['id'], 'waiting_for_approval' if pending else task.get('status', 'interrupted'))
+                    self.store.finish(run['id'], run_status(task, run.get('turn_id', '')))
 
     def submit(self, run, prompt, mode, name):
+        """Start a reserved run; return the chat it runs in.
+
+        A schedule made in a chat runs in that chat. When the worker had to use a
+        new chat instead (the old one was deleted, archived or cannot go on), the
+        schedule follows the new chat, so its later runs continue there.
+        """
         schedule = run['schedule']
-        # A schedule with no model of its own starts exactly as before.
-        own_model = {'model': schedule['model']} if schedule.get('model') else {}
+        # A schedule with no model or chat of its own starts exactly as before.
+        own = {key: schedule[key] for key in ('model', 'chat_id') if schedule.get(key)}
         try:
-            self.worker.submit(run['task_id'], prompt, mode, name, schedule['id'], **own_model)
+            placed = self.worker.submit(run['task_id'], prompt, mode, name, schedule['id'], **own)
         except Busy:
             self.store.defer(run)
             raise
@@ -384,8 +480,10 @@ class Engine:
         except Exception:
             self.store.finish(run['id'], 'failed', 'Could not start the ordinary task. Not retried.')
             raise
-        self.store.finish(run['id'], 'queued')
-        return run['task_id']
+        self.store.started(run['id'], placed)
+        if own.get('chat_id') and placed.task_id != own['chat_id']:
+            self.store.follow_chat(schedule['id'], own['chat_id'], placed.task_id)
+        return placed.task_id
 
     def tick(self, now=None):
         if not self.tick_lock.acquire(blocking=False):

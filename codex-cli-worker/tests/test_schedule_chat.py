@@ -1,5 +1,4 @@
 """A schedule made from a chat: the owner's chat and model fields, and who may set or read them."""
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,8 +30,8 @@ class RecordingWorker(fixtures.FakeWorker):
     """Records the extra arguments a run was started with."""
 
     def submit(self, task_id, prompt, mode, name, schedule_id, **extra):
-        super().submit(task_id, prompt, mode, name, schedule_id)
         self.extra = extra
+        return super().submit(task_id, prompt, mode, name, schedule_id)
 
 
 class OwnerFieldStoreTests(unittest.TestCase):
@@ -65,6 +64,14 @@ class OwnerFieldStoreTests(unittest.TestCase):
                     self.store.save(proposal(**field), owner=False, author=author, now=NOW)
         self.assertEqual(self.store.schedules(), [])
 
+    def test_the_run_of_a_codex_proposal_continues_the_chat_it_was_made_in(self):
+        value = self.store.save(proposal(), owner=False, author='codex', now=NOW, made_in=CHAT)
+        self.assertEqual(value['chat_id'], CHAT)
+        self.store.action(value['id'], 'approve', NOW, value['revision'])
+        worker = RecordingWorker()
+        scheduling.Engine(self.store, worker).tick(NOW + 3600)
+        self.assertEqual(worker.extra, {'chat_id': CHAT})
+
     def test_a_chat_or_model_that_is_not_a_plain_id_is_refused(self):
         bad_chats = (None, 7, ['x'], '../tasks', 'a b', '-leading', 'x' * 129, 'chat\n')
         bad_models = (7, ['x'], '', 'a b', '../model', 'x' * 81, 'model\n')
@@ -73,24 +80,6 @@ class OwnerFieldStoreTests(unittest.TestCase):
                 with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                     self.store.save(proposal(**{field: value}), owner=True, now=NOW)
         self.assertEqual(self.store.schedules(), [])
-
-    def test_a_schedule_from_an_older_version_opens_with_no_chat_and_still_runs(self):
-        old = Path(self.temp.name) / 'old.sqlite3'
-        with sqlite3.connect(old) as db:
-            db.execute('''CREATE TABLE schedules (
-                id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
-                mode TEXT NOT NULL, spec TEXT NOT NULL, approved INTEGER NOT NULL,
-                enabled INTEGER NOT NULL, next_due REAL, updated REAL NOT NULL, revision TEXT NOT NULL,
-                author TEXT NOT NULL DEFAULT 'owner')''')
-            db.execute("INSERT INTO schedules VALUES('old','Older schedule','Inspect the sample.','read-only',"
-                       "'{\"kind\": \"interval\", \"seconds\": 3600}',1,1,?,?,'revision','owner')", (NOW + 3600, NOW))
-        store = scheduling.Store(old)
-        schedule = store.schedules()[0]
-        self.assertEqual((schedule['name'], schedule['chat_id'], schedule['model']), ('Older schedule', '', None))
-        worker = RecordingWorker()
-        scheduling.Engine(store, worker).tick(NOW + 3600)
-        self.assertEqual(worker.sent[0][1:], ('Inspect the sample.', 'read-only', 'Older schedule', 'old'))
-        self.assertEqual(worker.extra, {}, 'a schedule with no model starts as it did before')
 
     def test_a_run_is_started_with_the_model_of_its_schedule(self):
         self.store.save(proposal(model=MODEL), owner=True, now=NOW)
@@ -151,6 +140,13 @@ class OwnerFieldApiTests(unittest.TestCase):
         self.assertEqual(run['status'], 'failed')
         self.assertEqual(run['error'], server.model_pin_message(MODEL, OTHER_MODEL) + ' Not retried.')
         self.assertNotIn(run['task_id'], server.tasks)
+
+    def test_a_codex_proposal_keeps_the_chat_whose_exchange_sent_it(self):
+        self.add_chat()
+        server.tasks[CHAT].update(status='running', current_turn_id='synthetic-turn')
+        thread = fixtures.open_exchange(self, CHAT)
+        self.service.dispatch({'operation': 'propose_schedule', 'arguments': proposal(), 'thread_id': thread})
+        self.assertEqual(self.service.engine().store.schedules()[0]['chat_id'], CHAT)
 
     def test_codex_cannot_read_the_chat_and_the_model(self):
         self.add_chat()

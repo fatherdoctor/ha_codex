@@ -13,12 +13,16 @@ from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_BASE_URL, DOMAIN
+from .const import DOMAIN
 from .coordinator import CodexCliCoordinator
 
 PARALLEL_UPDATES = 0
 # The worker's prompt kinds; keep in step with PROMPT_KINDS in codex-cli-worker/server.py.
 PROMPT_KINDS = ("command", "command_input", "file_change", "other")
+# The task states the worker reports (TASK_STATUSES in codex-cli-worker/server.py); the Last task sensor is an
+# enum of these, and its state is unknown (None) while the worker has no task.
+TASK_STATES = ["queued", "running", "waiting_for_input", "completed", "failed", "cancelled"]
+AUTH_STATES = ["logged_in", "auth_file_present", "not_logged_in"]
 
 
 async def async_setup_entry(
@@ -34,7 +38,6 @@ async def async_setup_entry(
             CodexTaskCountSensor(coordinator, entry),
             CodexPromptCountSensor(coordinator, entry),
             CodexAuthSensor(coordinator, entry),
-            CodexMailboxUnreadSensor(coordinator, entry),
             CodexFiveHourLimitSensor(coordinator, entry),
             CodexFiveHourResetSensor(coordinator, entry),
             CodexWeeklyLimitSensor(coordinator, entry),
@@ -61,7 +64,6 @@ class _CodexSensor(CoordinatorEntity[CodexCliCoordinator], SensorEntity):
             "name": "Codex",
             "manufacturer": "OpenAI",
             "model": "Codex for Home Assistant",
-            "configuration_url": entry.data.get(CONF_BASE_URL),
         }
 
 
@@ -70,25 +72,31 @@ class CodexLastTaskSensor(_CodexSensor):
 
     _attr_icon = "mdi:clipboard-text-clock-outline"
     _attr_translation_key = "last_task"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = TASK_STATES
 
     def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor with the unique ID key "last_task"."""
         super().__init__(coordinator, entry, "last_task")
 
     @property
-    def native_value(self) -> str:
-        """Return the status of the worker's latest task, or "unknown" when there is none."""
+    def native_value(self) -> str | None:
+        """Return the status of the worker's latest task, or None (unknown) when there is none or it is not a known state."""
         latest = (self.coordinator.data or {}).get("latest_task") or {}
-        return latest.get("status") or "unknown"
+        status = latest.get("status")
+        return status if status in TASK_STATES else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the latest task's details, its question with the choices offered, and the active task ID."""
+        """Return the latest task's IDs, its question with the choices offered, and the active task ID.
+
+        Every Home Assistant user can read these, and the recorder keeps them, so the chat's title and summary are
+        left out (the codex_cli_task_result event carries them for automations). The question and its choices stay:
+        an automation needs them to call codex_cli.reply_task.
+        """
         latest = (self.coordinator.data or {}).get("latest_task") or {}
         return {
             "task_id": latest.get("task_id"),
-            "title": latest.get("title"),
-            "summary": latest.get("summary"),
             "question": latest.get("question"),
             "choices": latest.get("choices") or [],
             "turn_id": latest.get("current_turn_id"),
@@ -163,6 +171,8 @@ class CodexAuthSensor(_CodexSensor):
 
     _attr_icon = "mdi:account-key-outline"
     _attr_translation_key = "auth_status"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = AUTH_STATES
 
     def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor with the unique ID key "auth_status"."""
@@ -180,16 +190,17 @@ class CodexAuthSensor(_CodexSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the login check message and auth file flag, plus the login flow's status, URL, user code and QR URL."""
+        """Return the login check message, the auth file flag and the login flow's status.
+
+        The sign-in code and its addresses are not attributes: every Home Assistant user can read an attribute. The
+        app page shows them, and codex_cli.get_login_status returns them to an administrator.
+        """
         login = (self.coordinator.data or {}).get("codex_login") or {}
         auth_flow = (self.coordinator.data or {}).get("auth_flow") or {}
         return {
             "message": login.get("message"),
             "has_auth_file": login.get("has_auth_file"),
             "auth_flow_status": auth_flow.get("status"),
-            "verification_url": auth_flow.get("verification_url"),
-            "user_code": auth_flow.get("user_code"),
-            "qr_url": auth_flow.get("qr_url"),
         }
 
 
@@ -216,7 +227,7 @@ class CodexFiveHourLimitSensor(_CodexSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the usage refresh state, the 5-hour, weekly and context figures, and the raw usage excerpt."""
+        """Return the usage refresh state, the 5-hour, weekly and context figures, and where they come from."""
         usage = (self.coordinator.data or {}).get("codex_usage") or {}
         return {
             "usage_status": usage.get("status"),
@@ -232,7 +243,6 @@ class CodexFiveHourLimitSensor(_CodexSensor):
             "weekly_reset_text": usage.get("weekly_reset"),
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),
-            "raw_excerpt": usage.get("raw_excerpt"),
             # rate_limits (the account's own read) or status_screen (estimated; the note says so).
             "source": usage.get("source"),
             "note": usage.get("note"),
@@ -312,7 +322,7 @@ class CodexWeeklyLimitSensor(_CodexSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the usage refresh state, the weekly, 5-hour and context figures, and the raw usage excerpt."""
+        """Return the usage refresh state, the weekly, 5-hour and context figures, and where they come from."""
         usage = (self.coordinator.data or {}).get("codex_usage") or {}
         return {
             "usage_status": usage.get("status"),
@@ -328,7 +338,6 @@ class CodexWeeklyLimitSensor(_CodexSensor):
             "five_hour_reset_text": usage.get("five_hour_reset"),
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),
-            "raw_excerpt": usage.get("raw_excerpt"),
             # rate_limits (the account's own read) or status_screen (estimated; the note says so).
             "source": usage.get("source"),
             "note": usage.get("note"),
@@ -365,22 +374,3 @@ class CodexWeeklyResetSensor(_CodexSensor):
             "limit": usage.get("weekly_limit"),
             "percent": usage.get("weekly_percent"),
         }
-
-
-class CodexMailboxUnreadSensor(_CodexSensor):
-    """Count retained messages the lead has not read, excluding its own posts."""
-
-    _attr_icon = "mdi:email-alert-outline"
-    _attr_translation_key = "mailbox_unread_lead"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
-        """Attach the lead's unread count to the Codex device."""
-        super().__init__(coordinator, entry, "mailbox_unread_lead")
-
-    @property
-    def native_value(self) -> int | None:
-        """Return unknown if the worker cannot read the mailbox."""
-        mailbox = (self.coordinator.data or {}).get("mailbox") or {}
-        value = (mailbox.get("unread") or {}).get("lead")
-        return value if type(value) is int and value >= 0 else None

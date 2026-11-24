@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
+from app_folders import isolated_app_folders
 from test_server import server
 
 
@@ -180,7 +181,7 @@ class SavedCopyTests(unittest.TestCase):
         self.assertIn(f"are kept for 3 days at: `{saved.resolve()}`", details)
         self.assertIn("New files that did not exist before: `packages/new.yaml`", details)
         self.assertIn("No copy of the previous version was saved for: `scripts.yaml`.", details)
-        self.assertIn("excluded from recovery copies", details)
+        self.assertIn("have no recovery copies", details)
 
 
 class BackupFolderTests(unittest.TestCase):
@@ -189,10 +190,10 @@ class BackupFolderTests(unittest.TestCase):
     def test_folder_depends_on_the_sandbox_and_the_task_folder(self):
         """Codex gets a backup folder only where its sandbox lets it write."""
         with tempfile.TemporaryDirectory() as temp:
-            config = Path(temp) / "config"
-            inside = config / "codex_tasks" / "t" / "turns" / "a"
-            outside = Path(temp) / "data" / "t"
-            with patch.object(server, "CONFIG_ROOT", config):
+            data = Path(temp) / "data"
+            inside = data / "codex_tasks" / "t" / "turns" / "a"
+            outside = Path(temp) / "config" / "codex_tasks" / "t"
+            with patch.object(server, "DATA_ROOT", data):
                 self.assertEqual(server.codex_backup_dir(inside, {"codex_sandbox": "workspace-write"}), inside / "backups")
                 self.assertEqual(server.codex_backup_dir(inside, {}), inside / "backups")
                 self.assertIsNone(server.codex_backup_dir(inside, {"codex_sandbox": "read-only"}))
@@ -201,11 +202,11 @@ class BackupFolderTests(unittest.TestCase):
 
     def test_exchange_info_carries_the_backup_folder_only_when_there_is_one(self):
         """exchange_info gives the backup instruction when a folder is given, and says to make no copies without one."""
-        with patch.object(server, "tasks", {}):
-            folder = Path("/config/codex_tasks/t/turns/a/backups")
+        with patch.dict(server.tasks, {}, clear=True):
+            folder = Path("/data/codex_tasks/t/turns/a/backups")
             backups = server.exchange_info("t", folder)["backups"]
             self.assertIn(f"copy it to {folder} under the same relative path", backups)
-            self.assertIn(f"{folder}/.storage/lovelace.kitchen", backups)
+            self.assertIn(f"{folder}/automations.yaml", backups)
             self.assertIn("Never copy secrets.yaml", backups)
             self.assertEqual(server.exchange_info("t", None)["backups"],
                              "This message has no backup folder. Make no backup copies.")
@@ -321,8 +322,10 @@ class RunTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.stack.enter_context(isolated_app_folders(server, self.root / "app"))  # the interaction log and others
         self.config = self.root / "config"
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "manifest_cache", {"root": "", "scanned_ns": 0, "files": {}}))
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.config))
@@ -419,9 +422,10 @@ class RunTests(unittest.TestCase):
         task = server.tasks[self.task_id]
         self.assertNotIn("backups", task)
         self.assertEqual(task["details"], "Notes")
-        self.assertEqual(task["snapshot"]["file_count"], 3)
+        # Files under .storage hold secrets and stay out of the archive (test_secret_guard.py).
+        self.assertEqual(task["snapshot"]["file_count"], 2)
         with tarfile.open(self.run_dir / server.SNAPSHOT_FILE) as archive:
-            self.assertEqual(sorted(archive.getnames()), [".storage/core.restore_state", "automations.yaml", "scripts.yaml"])
+            self.assertEqual(sorted(archive.getnames()), ["automations.yaml", "scripts.yaml"])
         self.assertIn(("phase", "Saving a full snapshot of your configuration", "done"), self.steps())
 
     def test_read_only_runs_get_no_backup_folder(self):
@@ -467,7 +471,8 @@ class CleanupTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory())) / "tasks"
-        for name, value in (("tasks", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root))
         self.options = {}
@@ -599,7 +604,8 @@ class ActivityPhaseTests(unittest.TestCase):
         """Start collecting steps for one running exchange."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set())):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set())):
             self.stack.enter_context(patch.object(server, name, value))
         server.tasks["t"] = {"task_id": "t", "status": "running", "current_turn_id": "turn-1"}
         server.start_activity("t", "turn-1")
@@ -637,7 +643,7 @@ class ActivityPhaseTests(unittest.TestCase):
         """A worker step still open at a successful end is saved as done."""
         server.start_phase("t", "review", "Checking the changes")
         server.tasks["t"]["status"] = "completed"
-        with patch.object(server, "atomic_json_write") as write, patch.object(server, "task_root", return_value=Path(tempfile.gettempdir())):
+        with patch.object(server.task_store, "atomic_json_write") as write, patch.object(server, "task_root", return_value=Path(tempfile.gettempdir())):
             server.finish_activity("t")
         self.assertEqual([step["status"] for step in write.call_args.args[1]["steps"]], ["done"])
 

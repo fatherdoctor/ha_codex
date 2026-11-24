@@ -1,6 +1,6 @@
 """Parts the add-on removed stay removed; each test fails if one comes back by mistake.
 
-- 0.3.5 removed the add-on's own grant layer: the action groups, the permission overrides and the
+- 0.3.6 removed the add-on's own grant layer: the action groups, the permission overrides and the
   ``act`` tool (``home_assistant_actions``). No launch approves a house action ahead of Codex's own
   permissions.
 - 0.3.6 (CX-SIMPLE.G) removed the add-on's own guards: the command check (hook) and its rules, the
@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import sys
 import tempfile
 import tomllib
@@ -28,7 +27,6 @@ sys.path.insert(0, str(WORKER))
 import test_approvals as fixtures
 
 import approvals
-import policy
 import remote_control
 
 server = fixtures.server  # the worker module as the approval fixtures loaded it (test_server's copy)
@@ -50,14 +48,13 @@ def configured_servers(args: list[str]) -> set[str]:
 
 
 class GrantLayerLaunchTests(unittest.TestCase):
-    """0.3.5: no launch registers the act tool. Each way Codex starts: the chat page (and a schedule run, which starts the same way) and the ChatGPT app."""
+    """0.3.6: no launch registers the act tool. Each way Codex starts: the chat page (and a schedule run, which starts the same way) and the ChatGPT app."""
 
     def page_launches(self) -> dict[str, list[str]]:
         task = {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}
-        with patch.object(server, "tasks", {"t": task}), patch.object(server, "read_options", return_value={}):
+        with patch.dict(server.tasks, {"t": task}, clear=True), patch.object(server, "read_options", return_value={}):
             return {
                 "page": server.build_app_server_args(),
-                "schedule run": server.build_app_server_args(attended=False),
             }
 
     def test_no_page_or_schedule_launch_registers_the_act_tool(self):
@@ -70,8 +67,9 @@ class GrantLayerLaunchTests(unittest.TestCase):
                 for module in REMOVED_MODULES:
                     self.assertFalse(any(module in arg for arg in args))
 
-    def test_the_app_launch_registers_the_read_tool_and_the_call_tool_only(self):
-        self.assertEqual(configured_servers(server.relay_tool_args()), {"home_assistant_relay", "home_assistant_call"})
+    def test_the_app_launch_registers_the_read_tool_the_call_tool_and_the_ha_mcp_server(self):
+        self.assertEqual(configured_servers(server.relay_tool_args()), {"home_assistant_relay", "home_assistant_call",
+                                                                   "home_assistant_mcp"})
 
     def test_the_page_rules_no_longer_name_the_act_tool(self):
         self.assertNotIn(REMOVED_SERVER, server.PAGE_INSTRUCTIONS)
@@ -79,7 +77,7 @@ class GrantLayerLaunchTests(unittest.TestCase):
 
 
 class GrantLayerPartsTests(unittest.TestCase):
-    """0.3.5: the settings route, the modules and the overrides socket of the grant layer are gone."""
+    """0.3.6: the settings route, the modules and the overrides socket of the grant layer are gone."""
 
     def test_the_settings_route_is_gone(self):
         rules = {rule.rule for rule in server.app.url_map.iter_rules()}
@@ -205,37 +203,11 @@ class HouseRulesTests(unittest.TestCase):
             instructions = home / "AGENTS.md"
             instructions.write_text("Owner instructions, unchanged.")
             with patch.multiple(server, CODEX_HOME=home, CODEX_CONFIG_PATH=home / "config.toml", DATA_ROOT=root,
-                                AUTH_QR_DIR=root / "qr"), \
+                                OLD_AUTH_QR_DIR=root / "qr"), \
                  patch.object(server, "task_root", return_value=root / "tasks"), \
                  patch.object(server, "api_token", return_value="synthetic"):
                 server.ensure_runtime_files()
             self.assertEqual(instructions.read_text(), "Owner instructions, unchanged.")
-
-    def test_migration_removes_only_exact_legacy_copy(self):
-        with tempfile.TemporaryDirectory() as folder:
-            home = Path(folder)
-            target = home / "AGENTS.md"
-            old = b"synthetic old bundled copy"
-            with patch.object(policy, "LEGACY_INSTRUCTIONS_SHA256", frozenset({hashlib.sha256(old).hexdigest()})):
-                target.write_bytes(old)
-                target.chmod(0o444)
-                self.assertTrue(policy.remove_legacy_instructions(home))
-                self.assertFalse(target.exists())
-                self.assertFalse(policy.remove_legacy_instructions(home))
-                target.write_text("Edited by owner")
-                self.assertFalse(policy.remove_legacy_instructions(home))
-                self.assertEqual(target.read_text(), "Edited by owner")
-
-    def test_migration_never_follows_a_symlink(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            target = root / "owner.md"
-            target.write_text("synthetic owner text")
-            home = root / "home"
-            home.mkdir()
-            (home / "AGENTS.md").symlink_to(target)
-            self.assertFalse(policy.remove_legacy_instructions(home))
-            self.assertEqual(target.read_text(), "synthetic owner text")
 
     def test_config_agents_read_stays_unchanged(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -270,7 +242,7 @@ class HouseRulesTests(unittest.TestCase):
         self.assertEqual(present, server.PAGE_INSTRUCTIONS)
 
     def test_optional_starter_reference_is_plain_published_separately_text(self):
-        docs = (WORKER / "DOCS.md").read_text()
+        docs = (WORKER.parent / "docs" / "app-reference.md").read_text()
         paragraph = next(line for line in docs.splitlines() if line.startswith("**Protected policy.**"))
         self.assertIn("the Whole Home Agent starter kit (published separately)", paragraph)
         self.assertNotIn("https://", paragraph)
@@ -289,7 +261,7 @@ class HouseRulesTests(unittest.TestCase):
         self.assertIn("no bundled house rules", version)
 
     def test_reviewed_document_sections_have_one_blank_line(self):
-        docs = (WORKER / "DOCS.md").read_text()
+        docs = (WORKER.parent / "docs" / "app-reference.md").read_text()
         paragraph = next(line for line in docs.splitlines() if line.startswith("**Protected policy.**"))
         self.assertIn(paragraph + "\n\n**Who can answer.**", docs)
         changelog = (WORKER / "CHANGELOG.md").read_text()

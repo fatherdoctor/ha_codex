@@ -18,7 +18,7 @@ arch:
 map:
   - type: homeassistant_config
     read_only: false
-    path: /config
+    path: /homeassistant
   - type: addon_config
     read_only: false
     path: /addon_config
@@ -32,46 +32,51 @@ backup_exclude:
   - "*/.ssh"
   - "*/github"
   - "*/github.sock"
+  - "*/chat_uploads"
 discovery:
   - codex_cli
 options:
+  model_choice: Account default
   codex_model: default
   model_reasoning_effort: medium
   reasoning_summary: concise
   codex_sandbox: workspace-write
-  task_root: /config/codex_tasks
   task_timeout_seconds: 3600
   task_stall_seconds: 600
   auto_save_lovelace: true
   config_check: true
   full_snapshot: false
   backup_retention_days: 7
-  browser_verification: true
-  browser_memory_limit_mib: 1536
+  chat_retention_days: 14
   local_docs: true
+  warm_start: true
   ha_url: ""
   remote_control_name: Home Assistant
   install_integration: true
+  home_assistant_mcp: true
 schema:
-  codex_model: list(default|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5.5)
+  model_choice: list(Account default|gpt-6.2-sol|gpt-6-astra|gpt-6.1-sol|gpt-6.1-terra|gpt-6-sol|gpt-6-luna|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|custom)
+  codex_model: str?
   model_pin: str?
-  model_reasoning_effort: list(minimal|low|medium|high|xhigh)
+  model_reasoning_effort: str
   reasoning_summary: list(concise|detailed|none)
   codex_sandbox: list(workspace-write|read-only)
-  task_root: str
   notify_service: str?
   github_client_id: str?
+  git_author_name: str?
+  git_author_email: str?
   task_timeout_seconds: int
   task_stall_seconds: int(0,86400)
   auto_save_lovelace: bool
   config_check: bool
   full_snapshot: bool
   backup_retention_days: int(1,365)
-  browser_verification: bool
-  browser_memory_limit_mib: int(512,8192)
+  chat_retention_days: int(1,365)
   local_docs: bool
+  warm_start: bool
   ha_url: str?
   HA_TOKEN: password?
   remote_control_name: str?
   interactions_to_keep: int(10,100)?
   install_integration: bool
+  home_assistant_mcp: bool

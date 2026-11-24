@@ -1,8 +1,8 @@
 """The protected permission policy: what the worker allows, read from a file Codex cannot edit.
 
-The policy ships inside the app image (read-only, outside /config and outside
+The policy ships inside the app image (read-only, outside /homeassistant and outside
 every sandbox's writable roots). The worker reads it at startup and before
-every exchange. Nothing in /config, the app options or a chat message can
+every exchange. Nothing in /homeassistant, the app options or a chat message can
 loosen it: a setting the policy does not allow stops the worker at startup and
 refuses each task with a "needs support" state.
 
@@ -14,10 +14,6 @@ is an owner file from then on and is not part of this policy.
 from __future__ import annotations
 
 import json
-import errno
-import hashlib
-import os
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -33,28 +29,6 @@ def _shipped(name: str, source_name: str) -> Path:
 
 
 POLICY_PATH = _shipped("policy.json", "policy.json")
-# Public fingerprint of the removed bundled text, for upgrade cleanup only.
-LEGACY_INSTRUCTIONS_SHA256 = frozenset({
-    (
-        '18215b691022cb4b'
-        'c23dcc1fef71bf2a'
-        '5ac60d6ce9a6bcd2'
-        'f9754deb729662b2'
-    ),
-    (
-        '9f75e46225425a42'
-        'e9b543f5d19abe4b'
-        '6c567657b1e53a6d'
-        '7a28f20290bd17a7'
-    ),
-    (
-        'ac4e2a269dcd7f0b'
-        '3f0edd9f569cb39c'
-        '95f02724b20221ec'
-        'ae9fc98df217503f'
-    ),
-})
-
 # Used only when the policy file is missing from the image, which is itself a
 # "needs support" fault: the defaults are the strict ones.
 STRICT_POLICY: dict[str, Any] = {
@@ -131,25 +105,3 @@ def policy_problem(options: dict[str, Any], path: Path | None = None) -> str:
     return ""
 
 
-def remove_legacy_instructions(codex_home: Path) -> bool:
-    """Remove only an exact old bundled copy; preserve owner edits and symlinks."""
-    target = codex_home / "AGENTS.md"
-    try:
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except FileNotFoundError:
-        return False
-    except OSError as error:
-        if error.errno == errno.ELOOP:  # Never follow a symlink.
-            return False
-        raise
-    with os.fdopen(fd, "rb") as stream:
-        info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384:
-            return False
-        if hashlib.sha256(stream.read()).hexdigest() not in LEGACY_INSTRUCTIONS_SHA256:
-            return False
-    current = target.lstat()
-    if (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino):
-        return False
-    target.unlink()
-    return True

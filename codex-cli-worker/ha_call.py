@@ -1,10 +1,12 @@
 """The worker side of the home_assistant_call tool: one Home Assistant action, sent with the worker's own access.
 
 Codex asks the person before each call (the tool is not approved ahead), then its bridge,
-ha_call_mcp.py, passes the request here over a private socket with the key of the running
-turn. This module, not the bridge, holds the checks:
+ha_call_mcp.py, passes the request here over a private socket with the thread id that Codex put in
+the call. A chat and the ChatGPT app's remote control each have their own socket, so the socket
+tells the worker which of the two asks. This module, not the bridge, holds the checks:
 
-- a request without the current key of a running chat sends nothing;
+- on the chat socket, a request that does not name the thread of a running chat sends nothing;
+- on the app's socket (RelayCall), a request while remote control does not run sends nothing;
 - a malformed request (a service that is not domain.service, an unknown field) sends nothing;
 - a request that names the entity ("name") is sent only when the name fits exactly one entity
   of the service's domain (name_match.py); otherwise it sends nothing and lists the candidates.
@@ -16,11 +18,9 @@ It refuses no service by name: the person's answer to Codex's request is the gat
 """
 from __future__ import annotations
 
-import hmac
 import json
 import os
 import re
-import secrets
 import socketserver
 import threading
 from pathlib import Path
@@ -40,7 +40,7 @@ MAX_READBACK = 5
 CALL_TIMEOUT_SECONDS = 60
 CORE_SERVICES_URL = "http://supervisor/core/api/services/"
 # The task name of the ChatGPT app's remote control. A page chat's id never has this form (it starts with a
-# date). The relay's key holds while the relay process runs, not for one turn.
+# date). The app's calls hold while the relay process runs, not for one turn.
 RELAY_TASK = "remote-control"
 
 
@@ -111,55 +111,36 @@ def changed_entities(answer):
 
 
 class HomeAssistantCall:
-    """Issue each running turn a call key, and send the calls that present it to Home Assistant."""
+    """Answer the chat socket: send a call of a chat's running exchange to Home Assistant."""
 
-    def __init__(self, worker, relay_running=lambda: False):
-        """Keep the worker that provides tasks and the token.
-
-        relay_running says whether the remote-control process runs now; the relay's key holds only then.
-        """
+    def __init__(self, worker):
+        """Keep the worker that provides tasks and the token."""
         self.worker = worker
-        self.relay_running = relay_running
-        self.capabilities = {}
+        self.begun = set()
         self.lock = threading.Lock()
 
     def begin(self, task_id):
-        """Allow calls for the task's running exchange, or issue the relay's key for a relay launch, and return it.
-
-        run_task calls this only when a person attends the exchange. For a chat the value stays in the worker;
-        only the relay's value goes to a process. An earlier value of the same task stops working.
-        """
-        capability = secrets.token_urlsafe(32)
+        """Allow calls for the task's running exchange; run_task calls this for every exchange, a scheduled run's included."""
         with self.lock:
-            self.capabilities[task_id] = capability
-        return capability
+            self.begun.add(task_id)
 
     def end(self, task_id):
         """End the task's calls, so a later request for it sends nothing."""
         with self.lock:
-            self.capabilities.pop(task_id, None)
+            self.begun.discard(task_id)
 
     def task_for(self, payload):
-        """Return the task that may send this request, or None.
+        """Return the chat task that may send this request, or None.
 
-        A request with a key comes from remote control: only the relay's key counts, and only while the relay
-        runs. A request without a key names its chat by thread id: that chat needs a running exchange that is
-        not canceled and that a person attends (begin ran for it). A chat's thread never reaches the relay.
+        The request names its chat by the thread id that Codex wrote into the call: that chat needs a running
+        exchange that is not canceled (begin ran for it and end did not). Who started the exchange, a person or
+        a schedule, makes no difference here: Codex's question before the call is the gate, and it waits in the
+        chat for a person. No request on this socket is the app's, whatever it holds.
         """
-        if "capability" in payload:
-            supplied = payload["capability"]
-            if not isinstance(supplied, str) or not supplied or not supplied.isascii():
-                return None
-            with self.lock:
-                key = self.capabilities.get(RELAY_TASK)
-            if key is None or not hmac.compare_digest(supplied, key):
-                return None
-            # The app has no chat on the page. Codex in the relay asks the person before each call.
-            return RELAY_TASK if self.relay_running() else None
         task_id = tool_threads.CHATS.task_for(payload.get("thread_id"))
         with self.lock:
-            attended = task_id is not None and task_id != RELAY_TASK and task_id in self.capabilities
-        if not attended:
+            begun = task_id is not None and task_id in self.begun
+        if not begun:
             return None
         if self.worker.task_cancellation_requested(task_id):
             return None
@@ -174,7 +155,7 @@ class HomeAssistantCall:
             return {"status": "unavailable", "message": "Invalid call request"}
         task_id = self.task_for(payload)
         if task_id is None:
-            return {"status": "unavailable", "message": "No running exchange that a person attends: nothing was sent"}
+            return {"status": "unavailable", "message": "No running exchange: nothing was sent"}
         arguments = payload.get("arguments")
         try:
             if isinstance(arguments, dict) and "name" in arguments:
@@ -269,7 +250,11 @@ class HomeAssistantCall:
         return {"status": "ok", "service": service, "changed": changed}
 
     def serve(self, path):
-        """Start a Unix socket server at path, readable by the worker's user only, that answers call requests."""
+        """Start a Unix socket server at path, readable by the worker's user only, that answers call requests.
+
+        A command in a Codex sandbox cannot connect to it (tests/test_sandbox_sockets.py); only a tool bridge
+        that Codex starts outside the sandbox, or a command a person or Codex's reviewer let out of it, can.
+        """
         engine = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -296,3 +281,21 @@ class HomeAssistantCall:
         os.chmod(path, 0o600)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         return server
+
+
+class RelayCall(HomeAssistantCall):
+    """Answer the ChatGPT app's own socket: a request on it is remote control's, and holds while the relay runs.
+
+    The socket, not a key, says that the request is the app's (D-CX-KEYS): only the relay's bridge gets this
+    socket's path (server.relay_env), and a page chat's bridge uses the chat socket. The app has no chat on the
+    page; Codex in the relay asks the person in the app before each call.
+    """
+
+    def __init__(self, worker, relay_running):
+        """Keep the worker, and relay_running, which says whether the remote-control process runs now."""
+        super().__init__(worker)
+        self.relay_running = relay_running
+
+    def task_for(self, payload):
+        """Return RELAY_TASK while the relay runs and is not stopping, else None; the request's thread id is not read."""
+        return RELAY_TASK if self.relay_running() else None

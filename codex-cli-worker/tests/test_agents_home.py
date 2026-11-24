@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import yaml
 
+from app_folders import isolated_app_folders
 from test_server import server
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,12 +132,6 @@ class AgentsHome(unittest.TestCase):
         self.assertEqual(self.link.read_text(encoding="utf-8"), "Not ours\n")
         self.assertIn("left alone", self.log)
 
-    def test_the_link_survives_the_removal_of_an_old_bundled_copy(self):
-        self.agents.write_text("Owner rules\n", encoding="utf-8")
-        self.run_quiet(server.link_agents_file)
-        self.assertFalse(server.protected_policy.remove_legacy_instructions(self.home))
-        self.assertTrue(self.link.is_symlink())
-
     def test_the_editor_reads_and_writes_the_app_folder(self):
         server.write_agents_file("Edited in the editor")
         self.assertEqual(self.agents.read_text(encoding="utf-8"), "Edited in the editor\n")
@@ -151,14 +146,14 @@ class AgentsHomeDefaults(unittest.TestCase):
 
     def test_the_paths_are_the_app_folder_and_codex_home(self):
         self.assertEqual(server.AGENTS_PATH, Path("/addon_config/AGENTS.md"))
-        self.assertEqual(server.LEGACY_AGENTS_PATH, Path("/config/AGENTS.md"))
+        self.assertEqual(server.LEGACY_AGENTS_PATH, Path("/homeassistant/AGENTS.md"))
         self.assertEqual(server.CODEX_AGENTS_LINK, server.CODEX_HOME / "AGENTS.md")
 
     def test_config_yaml_maps_addon_config_apart_from_the_home_assistant_config(self):
         mounts = {m["type"]: m for m in yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))["map"]}
         self.assertEqual(mounts["addon_config"]["path"], "/addon_config")
         self.assertFalse(mounts["addon_config"]["read_only"])
-        self.assertEqual(mounts["homeassistant_config"]["path"], "/config")
+        self.assertEqual(mounts["homeassistant_config"]["path"], "/homeassistant")
 
     def test_main_moves_then_offers_the_starter_then_links_after_the_codex_config(self):
         calls = []
@@ -173,7 +168,12 @@ class AgentsHomeDefaults(unittest.TestCase):
                     raise StopHere
             return call
 
+        # The steps this test does not replace (the chat move, the old sign-in images) run in a temporary copy
+        # of /data, /homeassistant and /addon_config.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
         with (
+            isolated_app_folders(server, Path(folder.name)),
             patch.object(server, "read_options", return_value={}),
             patch.object(server.protected_policy, "policy_problem", return_value=""),
             patch.object(server, "make_worker_undumpable", return_value=True),

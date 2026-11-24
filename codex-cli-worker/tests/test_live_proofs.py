@@ -38,6 +38,7 @@ import contextlib
 import json
 import os
 import queue
+import shutil
 import signal
 import subprocess
 import sys
@@ -309,17 +310,23 @@ RELAY = textwrap.dedent('''
 ''')
 
 
-def worker_app_server_args(root: Path, attended: bool = True) -> tuple[list[str], list[str]]:
+def worker_app_server_args(root: Path) -> tuple[list[str], list[str]]:
     """Return the worker's own app-server arguments with each tool program behind the relay, and the server names.
 
     server.build_app_server_args is the launch the chat page uses. Only the binary and each tool program's
     command change: the command becomes the relay, which then starts the same program with the same arguments.
+
+    The option home_assistant_mcp is off here: these proofs cover the worker's own tool programs, and the bundled
+    hass-mcp (installed only in the image, with a Supervisor token) cannot start on a test runner, so Codex would
+    report it failed after its 20 second start timeout. test_ha_mcp_option.py covers that server's launch.
     """
+    import hass_mcp
     import server
 
     relay = root / "relay.py"
     relay.write_text(RELAY, encoding="utf-8")
-    args = server.build_app_server_args(attended=attended)
+    with patch.object(hass_mcp, "enabled", lambda _options: False):
+        args = server.build_app_server_args()
     assert args[1] == "app-server", args[:2]
     args = args[2:]
     names = []
@@ -630,6 +637,70 @@ sys.stdin.read()
 """
 
 
+@unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
+class SandboxGitIdentity(unittest.TestCase):
+    def test_git_resolves_worker_and_repository_identities_in_the_sandbox(self) -> None:
+        import server
+
+        cache = Path.home() / ".cache"
+        cache.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=cache) as folder:
+            root = Path(folder)
+            home = root / "data" / "codex-home"
+            home.mkdir(parents=True)
+            with (patch.multiple(server, DATA_ROOT=home.parent, CODEX_HOME=home),
+                  patch.object(server, "read_options", return_value={})):
+                server.write_git_identity_defaults({})
+                env = server.codex_env()
+            checkout = root / "checkout"
+            subprocess.run(["git", "init", "-q", str(checkout)], check=True)
+            # Git reports the identities it would put on a commit. This works with read-only .git metadata.
+            for identity in ("ChatGPT Codex <noreply@openai.com>", "Example Project <project@example.invalid>"):
+                if identity.startswith("Example"):
+                    subprocess.run(["git", "config", "user.name", "Example Project"], cwd=checkout, check=True)
+                    subprocess.run(["git", "config", "user.email", "project@example.invalid"], cwd=checkout, check=True)
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", 'sandbox_mode="read-only"', "--", "sh", "-ec",
+                     "git var GIT_AUTHOR_IDENT && git var GIT_COMMITTER_IDENT"],
+                    cwd=checkout, env=env, text=True, capture_output=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                identities = [line.rsplit(" ", 2)[0] for line in result.stdout.splitlines()]
+                self.assertEqual(identities, [identity, identity])
+
+
+@unittest.skipUnless(os.environ.get("HA_TEST_REQUIRE_CODEX") == "1", "requires the built worker image")
+class SandboxWorkbook(unittest.TestCase):
+    """The image ships spreadsheet support for the Python that Codex commands run."""
+
+    def test_openpyxl_round_trip(self) -> None:
+        create = textwrap.dedent("""
+            from openpyxl import Workbook
+
+            book = Workbook()
+            book.active["A1"] = "=SUM(1,2)"
+            book.save("example.xlsx")
+        """)
+        read = textwrap.dedent("""
+            from openpyxl import load_workbook
+
+            book = load_workbook("example.xlsx", read_only=True)
+            print(book.active["A1"].value)
+            book.close()
+        """)
+        with tempfile.TemporaryDirectory() as work:
+            # Saving a workbook needs temporary files. Reading an existing workbook does not.
+            for mode, script, expected in (("workspace-write", create, ""), ("read-only", read, "=SUM(1,2)")):
+                result = subprocess.run(
+                    [CODEX, "sandbox", "--config", f'sandbox_mode="{mode}"',
+                     "--config", "check_for_update_on_startup=false", "--", "python3", "-I", "-c", script],
+                    cwd=work, capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, f"{mode}: {result.stderr}")
+                self.assertEqual(result.stdout.strip(), expected, mode)
+
+
+
 class CloseWaitsForChildren(unittest.TestCase):
     """AppServer.close ends what the app-server started, so tearDown can remove the folder (CX-PROOFS-RMTREE).
 
@@ -690,8 +761,20 @@ class LiveProofs(unittest.TestCase):
                 return
             except OSError:
                 if attempt == 9:
-                    raise
+                    break
                 time.sleep(0.5)
+        # Codex can keep writing into its own scratch folder (codex-home/.tmp) after the proof has ended; on slow
+        # machines that outlasts the retries above. A leftover there is not a proof failure, so ignore errors under
+        # that folder only; any other leftover still fails the test.
+        scratch = (self.root / "codex-home" / ".tmp").resolve()
+
+        def ignore_scratch(function: Any, path: str, error: BaseException) -> None:
+            here = Path(path).resolve()
+            # The folders above the scratch folder cannot be removed while it still holds files, so they count too.
+            if here != scratch and scratch not in here.parents and here not in scratch.parents:
+                raise error
+
+        shutil.rmtree(self.root, onexc=ignore_scratch)
 
     def start(self, extra_args: list[str] | None = None, home: Path | None = None,
               tools: bool = True) -> AppServer:
