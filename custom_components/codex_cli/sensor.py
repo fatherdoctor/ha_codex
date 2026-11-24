@@ -38,9 +38,9 @@ async def async_setup_entry(
             CodexTaskCountSensor(coordinator, entry),
             CodexPromptCountSensor(coordinator, entry),
             CodexAuthSensor(coordinator, entry),
-            CodexFiveHourLimitSensor(coordinator, entry),
+            CodexFiveHourUsedSensor(coordinator, entry),
             CodexFiveHourResetSensor(coordinator, entry),
-            CodexWeeklyLimitSensor(coordinator, entry),
+            CodexWeeklyUsedSensor(coordinator, entry),
             CodexWeeklyResetSensor(coordinator, entry),
         ]
     )
@@ -204,26 +204,23 @@ class CodexAuthSensor(_CodexSensor):
         }
 
 
-class CodexFiveHourLimitSensor(_CodexSensor):
-    """Show Codex 5-hour usage line from interactive status."""
+class CodexFiveHourUsedSensor(_CodexSensor):
+    """Show the percentage of the Codex 5-hour usage limit that is used."""
 
     _attr_icon = "mdi:timer-sand"
-    _attr_translation_key = "five_hour_limit"
+    _attr_translation_key = "five_hour_used"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the sensor with the unique ID key "five_hour_limit"."""
-        super().__init__(coordinator, entry, "five_hour_limit")
+        """Initialize the sensor with the unique ID key "five_hour_used"."""
+        super().__init__(coordinator, entry, "five_hour_used")
 
     @property
     def native_value(self) -> int | None:
-        """Return the percentage of the 5-hour limit that is left, or None when it is missing or not an integer."""
+        """Return the percentage of the 5-hour limit that is used, or None when it is missing or not an integer."""
         usage = (self.coordinator.data or {}).get("codex_usage") or {}
-        try:
-            return int(str(usage.get("five_hour_percent") or ""))
-        except ValueError:
-            return None
+        return _used_percent(usage.get("five_hour_percent"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -247,6 +244,14 @@ class CodexFiveHourLimitSensor(_CodexSensor):
             "source": usage.get("source"),
             "note": usage.get("note"),
         }
+
+
+def _used_percent(left: Any) -> int | None:
+    """Return 100 minus the percentage left that Codex reports, or None when it is missing or not an integer."""
+    try:
+        return min(100, max(0, 100 - int(str(left or ""))))
+    except ValueError:
+        return None
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -299,26 +304,23 @@ class CodexFiveHourResetSensor(_CodexSensor):
         }
 
 
-class CodexWeeklyLimitSensor(_CodexSensor):
-    """Show Codex weekly usage line from interactive status."""
+class CodexWeeklyUsedSensor(_CodexSensor):
+    """Show the percentage of the Codex weekly usage limit that is used."""
 
     _attr_icon = "mdi:calendar-week"
-    _attr_translation_key = "weekly_limit"
+    _attr_translation_key = "weekly_used"
     _attr_native_unit_of_measurement = PERCENTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry) -> None:
-        """Initialize the sensor with the unique ID key "weekly_limit"."""
-        super().__init__(coordinator, entry, "weekly_limit")
+        """Initialize the sensor with the unique ID key "weekly_used"."""
+        super().__init__(coordinator, entry, "weekly_used")
 
     @property
     def native_value(self) -> int | None:
-        """Return the percentage of the weekly limit that is left, or None when it is missing or not an integer."""
+        """Return the percentage of the weekly limit that is used, or None when it is missing or not an integer."""
         usage = (self.coordinator.data or {}).get("codex_usage") or {}
-        try:
-            return int(str(usage.get("weekly_percent") or ""))
-        except ValueError:
-            return None
+        return _used_percent(usage.get("weekly_percent"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

@@ -2,6 +2,14 @@
 
 ## 0.6.0 (unreleased)
 
+- **Breaking: the usage-limit sensors report percent used, not percent left.** `sensor.codex_5_hour_limit` and
+  `sensor.codex_weekly_limit` showed what was left, and people read 97 as 97 percent used. They are replaced by
+  **5-hour limit used** (`sensor.codex_5_hour_limit_used`) and **Weekly limit used**
+  (`sensor.codex_weekly_limit_used`), whose state is 100 minus what Codex reports as left, the same way Claude shows
+  it; the attributes are unchanged (the `*_percent` attributes still hold the figure as Codex reports it, percent
+  left). The old sensors are removed when the integration starts, so an automation or template that still reads an old
+  entity id fails with an unknown entity instead of reading the number backwards. Change such a reader to the new id
+  and read the state as percent used.
 - **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
   that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
   next run starts a new one.

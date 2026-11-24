@@ -23,9 +23,9 @@ There is no worker URL or API token to enter.
 ## Entities
 
 - Auth status: Shows whether Codex CLI is signed in: Signed in, Saved sign-in does not work, or Not signed in. The sign-in code and its address are not attributes; the app page shows them, and `codex_cli.get_login_status` returns them to an administrator.
-- 5-hour limit: Shows the percentage remaining in the 5-hour window when Codex reports one. The entity remains for compatibility and is `unknown` with `reported: false` when that window is omitted.
+- 5-hour limit used: Shows the percentage used of the 5-hour window (100 minus what Codex reports as left) when Codex reports one. The entity remains for compatibility and is `unknown` with `reported: false` when that window is omitted.
 - 5-hour reset: Shows when the 5-hour window resets, if a reset time can be parsed.
-- Weekly limit: Shows the percentage remaining in the weekly window when Codex reports one.
+- Weekly limit used: Shows the percentage used of the weekly window (100 minus what Codex reports as left) when Codex reports one.
 - Weekly reset: Shows when the weekly window resets, if a reset time can be parsed.
 - Active tasks: Shows the number of currently running Codex tasks.
 - Last task: Shows the latest task's status (Queued, Running, Waiting for input, Completed, Failed or Cancelled), or unknown when there is no task. Its attributes are `task_id`, `turn_id`, `question`, `choices`, `updated_at`, `active_task_id` and, when that task failed, `error` with the reason.

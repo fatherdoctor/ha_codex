@@ -57,14 +57,14 @@
           "not_logged_in": "Not signed in"
         }
       },
-      "five_hour_limit": {
-        "name": "5-hour limit"
+      "five_hour_used": {
+        "name": "5-hour limit used"
       },
       "five_hour_reset": {
         "name": "5-hour reset"
       },
-      "weekly_limit": {
-        "name": "Weekly limit"
+      "weekly_used": {
+        "name": "Weekly limit used"
       },
       "weekly_reset": {
         "name": "Weekly reset"

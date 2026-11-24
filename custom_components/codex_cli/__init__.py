@@ -71,6 +71,9 @@ LIST_TASKS_SCHEMA = vol.Schema({
 START_LOGIN_SCHEMA = vol.Schema({vol.Optional(ATTR_FORCE, default=False): bool})
 # The key of the mailbox sensor that version 0.4 removed; installs before 0.4 have this entity.
 REMOVED_MAILBOX_SENSOR_KEY = "mailbox_unread_lead"
+# 0.6 replaced the two "percent left" limit sensors with "percent used" ones under new keys, so a reader of the
+# old entity ids fails loudly (unknown entity) instead of reading a flipped number. Remove at 0.8.
+REMOVED_LIMIT_LEFT_SENSOR_KEYS = ("five_hour_limit", "weekly_limit")
 # The read-only system user that versions before 0.4.0 created for dashboard screenshots, and the file that holds
 # its ID. Version 0.4.0 removed the screenshots; setup removes this user. Remove this step after version 0.5.
 REMOVED_BROWSER_USER_NAME = "Dashboard verification"
@@ -106,6 +109,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_update_discovered_entry(hass, entry, worker.base_url)
     await _async_remove_mailbox_leftovers(hass, entry)
+    _async_remove_limit_left_sensors(hass, entry)
     await _async_remove_browser_user(hass)
     client = CodexCliApiClient(session, worker.base_url, worker.api_token)
     coordinator = CodexCliCoordinator(hass, client)
@@ -147,6 +151,14 @@ def _async_update_discovered_entry(hass: HomeAssistant, entry: ConfigEntry, base
     data = {CONF_BASE_URL: base_url}
     if dict(entry.data) != data or dict(entry.options):
         hass.config_entries.async_update_entry(entry, data=data, options={})
+
+
+def _async_remove_limit_left_sensors(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove the two "percent left" limit sensors of an install before 0.6, which the "used" sensors replace."""
+    registry = er.async_get(hass)
+    for key in REMOVED_LIMIT_LEFT_SENSOR_KEYS:
+        if entity_id := registry.async_get_entity_id(Platform.SENSOR, DOMAIN, f"{entry.entry_id}_{key}"):
+            registry.async_remove(entity_id)
 
 
 async def _async_remove_mailbox_leftovers(hass: HomeAssistant, entry: ConfigEntry) -> None:
