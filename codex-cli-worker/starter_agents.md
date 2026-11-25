@@ -49,10 +49,12 @@ mode of each chat.
 
 ## Memory
 
-Keep facts that last between chats in `/config/memory/`: one fact per file, and an index
-`/config/memory/MEMORY.md`, one line per file. Read the index when a chat starts. Save what the owner asks you to remember
-and lasting corrections; update a file rather than add a second; delete wrong facts. No secrets or personal details
-there (PINs, tokens, passwords, phone numbers, addresses); never commit `memory/`.
+Keep facts that last between chats in `/config/memory/`: one topic per file (a list, such as the devices you found, is
+one file), and an index `/config/memory/MEMORY.md`, one line per file. Don't copy what Home Assistant already records
+(devices, entities, areas); note only what it can't tell: where a device really is, what it's for, its quirks, the
+owner's names for things. Read the index when a chat starts. Save what the owner asks you to remember and lasting
+corrections; update a file rather than add a second; delete wrong facts. No secrets or personal details there (PINs,
+tokens, passwords, phone numbers, addresses); never commit `memory/`.
 
 ## This app's sensors
 

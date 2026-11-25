@@ -215,7 +215,9 @@ class StarterAgentsText(unittest.TestCase):
 
     def test_it_tells_codex_how_to_keep_a_memory(self):
         section = self.text.split("## Memory", 1)[1].split("\n## ", 1)[0]
-        for words in ("`/config/memory/`:", "one fact per file", "`/config/memory/MEMORY.md`",
+        self.assertNotIn("one fact per file", section)   # CX-MEMORY-RULE: Mike's install wrote ~200 files
+        for words in ("`/config/memory/`:", "one topic per file", "a list, such as the devices you found, is one file",
+                      "Don't copy what Home Assistant already records", "`/config/memory/MEMORY.md`",
                       "Read the index when a chat starts",
                       "update a file rather than add a second", "delete wrong facts", "No secrets", "never commit"):
             with self.subTest(words=words):
