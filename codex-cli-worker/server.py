@@ -5171,8 +5171,16 @@ def build_page_instructions():
 
 PAGE_INSTRUCTIONS = build_page_instructions()  # for callers that read it at import; the send paths call the function
 
-# Put in front of a page message on a thread that did not get PAGE_INSTRUCTIONS when it started: a thread
-# started in the ChatGPT app, or by version 0.3.2 or earlier of this app. exchange_info then returns the rules too.
+
+def rules_stamp(text: str) -> str:
+    """A short fingerprint of the page rules, kept as a task's told_rules to show which rules its thread was told."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+# Put in front of a page message on a thread whose told_rules differ from the current rules: a thread started in the
+# ChatGPT app, by an earlier version of this app, or before an update changed the rules. Codex keeps a thread's first
+# developer instructions until a compaction, so without this line an old chat runs on the old rules.
+# exchange_info then returns the rules too.
 RULES_POINTER = ("[Home Assistant page] Call the home_assistant_data exchange_info tool first. "
                  "Its rules entry holds the rules for messages from this page, and they replace older copies.")
 
@@ -6345,6 +6353,7 @@ class PreparedExchange(NamedTuple):
     before_manifest_path: Path
     options: dict[str, Any]
     permissions: str
+    rules: str
 
 
 def check_launch_policy(task_id: str) -> None:
@@ -6412,21 +6421,21 @@ def reset_final_file(final_file: Path) -> None:
 def write_exchange_message(task_id: str, prepared: PreparedExchange, prompt: str, reply: str | None,
                            session_id: str | None, backup_dir: Path | None) -> None:
     """Write the message Codex reads, and set the exchange_info that its tools return."""
-    # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
-    # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
-    # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
-    # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
-    # of this app) it is told once.
+    # A new thread gets the page rules as its developer instructions and learns its sandbox when it starts. A resumed
+    # thread is told in the message when its rules or its permissions differ from the ones it was last told (run_task
+    # records both once the turn starts); with no record (a thread from the ChatGPT app, or from an earlier version of
+    # this app) it is told once. For the rules that is a pointer in the message, and exchange_info carries them.
     permissions = prepared.permissions
     with lock:
         task = tasks.get(task_id, {})
-        has_page_instructions = bool(task.get("page_instructions"))
+        told_rules = task.get("told_rules")
         told_permissions = task.get("told_permissions")
-    point_to_rules = bool(session_id) and not has_page_instructions
+    point_to_rules = bool(session_id) and told_rules != prepared.rules
     changed_permissions = permissions if session_id and told_permissions != permissions else ""
     ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules,
                                                      permissions=permissions))
     if not session_id:
+        # Deprecated, written only so that 0.5 after a rollback still sees a page thread; this build reads told_rules.
         update_task(task_id, page_instructions=True)
     try:
         prepared.prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
@@ -6469,7 +6478,8 @@ def prepare_exchange(task_id: str, prompt: str, session_id: str | None, reply: s
     reset_final_file(final_file)
     prepare_ha_docs()
     permissions = permissions_note(task_mode_settings(task_id, options))
-    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions)
+    rules = rules_stamp(build_page_instructions())
+    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions, rules)
     write_exchange_message(task_id, prepared, prompt, reply, session_id, backup_dir)
     checkpoint(task_id)
     check_model_pin(task_id, options)
@@ -6624,10 +6634,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     task_dir, final_file = prepared.task_dir, prepared.final_file
     before_manifest_path, permissions = prepared.before_manifest_path, prepared.permissions
     # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
-    # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
-    # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
+    # Codex never read the message, so the next message must carry the rules pointer and the permissions line again.
+    # A repeated line does no harm; a lost one leaves Codex on the old rules or naming the old mode. (update_task
+    # changes nothing after a cancel.)
     if approval_session.turn_id:
-        update_task(task_id, told_permissions=permissions)
+        update_task(task_id, told_permissions=permissions, told_rules=prepared.rules)
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not approval_session.turn_id:

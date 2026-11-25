@@ -331,7 +331,7 @@ A conversation from the chat page is a Codex thread, and the ChatGPT app shows t
 
 Details that change from one message to the next are not part of the rules: the backup folder, the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)), the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool before its first command, file change or tool call in a message, and when your message can refer to a file, a document or something it cannot see in the chat, such as "Summarize this" with a document attached. The `permissions` entry of `exchange_info` names the sandbox and approval policy that the current message runs with. A message that Codex can answer from what it knows and from the chat, such as a greeting or a one-number reply, needs no tool call, so it gets its answer in one step. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
 
-A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
+A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A thread started before an update changed the rules has the old ones: Codex keeps a thread's first developer instructions until it compacts the thread. The app records which rules each chat was told (`told_rules` in its `task.json`, from 0.6). The first message from the page on a thread with no record or with older rules starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules; once that turn has started, the next messages carry no note until the rules change again. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
 
 Codex learns a thread's sandbox when the thread starts. When you change the chat's permission mode later, the next message starts with one line that gives the new sandbox and approval policy, and says that it replaces any mode named earlier in the chat. The page records what it told a thread once Codex's turn has started, so a message that fails to start gives the line again on the next one. A thread that the page has no record for (one from the ChatGPT app, or from an earlier version of this app) gets the line once. The ChatGPT app shows that line in front of your words on the first message after a change.
 
@@ -749,7 +749,7 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 The app web UI includes an editor for the app's `AGENTS.md` (in its own `addon_config` folder, not in `/homeassistant`) under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
 **Built-in instructions (0.6).** The app sends its own instructions with every chat: on the page they end the
-developer instructions of each new thread (and the rules that `exchange_info` returns), and in remote control they end
+developer instructions of each new thread (and the rules that `exchange_info` returns to a chat told older rules), and in remote control they end
 the developer instructions of the remote Codex process. The text is `builtin_instructions.md` in the app's source: the
 folders and how `/config` maps to `/homeassistant`, the Home Assistant tools, how to read logs, the secrets rules and
 the Git and GitHub rules. It ships in the image, so an update of the app updates it, and nobody edits it. Settings >
@@ -768,11 +768,16 @@ stays deleted while the app keeps its data, and an update of an app that has sta
 are instructions to Codex and not a safeguard; the sandbox, the command check and the approval cards work the same
 with or without them. To get the starter on an older install, copy the text from `starter_agents.md` into the editor.
 
-**From 0.5 to 0.6.** The secrets and Git rules of the 0.5 starter now ship with the app as built-in instructions. An
-`AGENTS.md` from 0.5 keeps working: you may remove its Secrets and Git and GitHub lines, and paste the Memory section
-of the new `starter_agents.md`. The 0.5 starter's other rules (change the home only on the owner's word, keep the old
-version, check before a restart, the safeguard defaults) are not in the new starter; keep them in your file if you
-want them.
+**From 0.5 to 0.6.** Most of the secrets rules and the Git and GitHub rules of the 0.5 starter now ship with the app
+as built-in instructions. Two do not: "Open secret files only when the owner asks" (rule 2), and never to stage
+personal or location data (the Git section). An `AGENTS.md` from 0.5 keeps working. You may remove its secrets and
+Git and GitHub lines and paste the Memory section of the new `starter_agents.md`; keep those two rules in your file if
+you want them. No other rule of the 0.5 starter is in the new texts either: rules 1 and 3 to 7 (change the home only
+on the owner's word, keep the old version, check before a restart, leave `.storage` to Home Assistant, one small
+change at a time, stop and ask when not sure), the safeguard defaults (ask before touching the protected places or
+changing another app's files under `/share` or `/media`), the section on this app's sensors, and "About this home".
+Keep any of them in your file if you want them. A chat from before the update gets the built-in instructions with its
+next message: the app records which rules each chat was told, and points a chat with older rules to the new ones once.
 
 **Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/homeassistant`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/homeassistant` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex then worked in that folder and would have read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/homeassistant` for you to merge or delete. The folder is part of the app's backup like its other data.
 
