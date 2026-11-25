@@ -1,3 +1,5 @@
 # The mechanical ruff format and import sort (git config blame.ignoreRevsFile .git-blame-ignore-revs).
 # A squash merge makes a new commit ID, so this line is right only after a merge commit; see the pull request.
 27b07d6207c605c3dce90d751ad96146540d13a5
+# The second mechanical format, after release/0.6 was merged in.
+f40ed18a329ab68ab3b0171099f2c1637da206d6
