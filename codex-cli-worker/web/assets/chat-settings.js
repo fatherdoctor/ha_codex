@@ -91,7 +91,7 @@ function setFootRow(id, dot, text) {
  * Each part of the page reports what it last read with noteAttention, from
  * the polls it already runs; nothing here asks the worker for more. GitHub
  * and Remote count only a sign-out the owner did not ask for: GitHub reports
- * "disconnected" after Disconnect and "expired" or "revoked" when the stored
+ * "disconnected" after Sign out and "expired" or "revoked" when the stored
  * sign-in stops working, and Remote reports "error" only while the owner's
  * switch is on. ChatGPT not signed in, or its status unreadable, is the one
  * red the owner cannot dismiss: no chat can run without it.
@@ -614,13 +614,13 @@ const GITHUB_STATE_TEXT = {
   disconnected: "Not connected to GitHub.",
   connecting: "Connecting. Enter the code below on GitHub.",
   ok: "Connected to GitHub.",
-  near_expiry: "GitHub still works, but this sign-in expires within 7 days. Choose Connect again before then.",
-  expired: "The GitHub sign-in expired. Choose Connect again.",
-  revoked: "GitHub no longer accepts this sign-in. Choose Connect again. If needed, restore the App's repository access on GitHub.",
+  near_expiry: "GitHub still works, but this sign-in expires within 7 days. Choose Sign in before then.",
+  expired: "The GitHub sign-in expired. Choose Sign in.",
+  revoked: "GitHub no longer accepts this sign-in. Choose Sign in. If needed, restore the App's repository access on GitHub.",
   access_changed: "The GitHub sign-in reaches different repositories or access than you connected.",
   failed: "The GitHub sign-in cannot be checked.",
 };
-// Connect again starts a GitHub App sign-in, so a token connection is sent to the token form instead.
+// Sign in starts a GitHub App sign-in, so a token connection is sent to the token form instead.
 const GITHUB_TOKEN_STATE_TEXT = {
   near_expiry: "GitHub still works, but this token expires within 7 days. Create a new token on GitHub, then choose Use a token instead.",
   expired: "This GitHub token expired. Create a new token on GitHub, then choose Use a token instead.",
@@ -794,7 +794,7 @@ function renderGithub(github) {
     }
   } else {
     flowArea.dataset.key = "";
-    // A failed Connect again also shows its reason, and says that the stored sign-in did not change.
+    // A failed new sign-in also shows its reason, and says that the stored sign-in did not change.
     const ended = connected
       ? { expired: "The new GitHub code expired before it was entered.",
         canceled: "The new GitHub sign-in was canceled.", failed: "The new GitHub sign-in failed." }[flow.status]
@@ -805,18 +805,13 @@ function renderGithub(github) {
     flowArea.replaceChildren(...(ended ? [textNode("p", `${ended}${why}${kept}`, "muted")] : []));
   }
   const retry = !connected && ["expired", "failed"].includes(flow.status);
-  $("github-connect").textContent = connected ? "Connect again" : retry ? "Get a new code" : "Connect GitHub";
+  $("github-connect").textContent = connected ? "Sign in" : retry ? "Get a new code" : "Connect GitHub";
   $("github-connect").hidden = waiting;
   // While a sign-in waits, the section shows only the card and Cancel (CSS hides the rest).
   $("github-section").classList.toggle("signing-in", waiting);
   $("github-cancel").hidden = !waiting;
-  for (const id of ["github-test", "github-check", "github-disconnect"]) $(id).hidden = !connected;
+  $("github-disconnect").hidden = !connected;
   $("github-accept").hidden = !(state === "access_changed" && !github.permission_problem);
-  if (!connected) $("github-test-result").hidden = true;
-  else if (github.last_test?.text) {
-    $("github-test-result").textContent = github.last_test.text;
-    $("github-test-result").hidden = false;
-  }
   const usable = ["ok", "near_expiry"].includes(state);
   const names = usable ? (github.repositories || []).filter((repo) => repo?.push && typeof repo.full_name === "string").map((repo) => repo.full_name) : [];
   for (const id of ["github-clone-repository", "github-link-repository"]) {
@@ -844,7 +839,7 @@ function githubUnavailable() {
   githubStatus = null;
   noteAttention("github", "");
   $("github-status").textContent = "Not available in this version of the add-on.";
-  for (const id of ["github-connect", "github-cancel", "github-test", "github-check", "github-accept", "github-disconnect"])
+  for (const id of ["github-connect", "github-cancel", "github-accept", "github-disconnect"])
     $(id).hidden = true;
   $("github-details").hidden = $("github-repositories").hidden = $("github-local").hidden = true;
   $("github-add-repositories").hidden = true;
@@ -890,18 +885,15 @@ async function githubAction(button, path, body, done) {
 }
 $("github-connect").onclick = () => githubAction($("github-connect"), "github/connect", {});
 $("github-cancel").onclick = () => githubAction($("github-cancel"), "github/cancel", {});
-$("github-test").onclick = () => githubAction($("github-test"), "github/test", {});
-$("github-check").onclick = () => githubAction($("github-check"), "github/check", {}, (data) =>
-  githubResult(`Check finished: ${data.github?.state ? githubStateText(data.github.state, data.github.kind) : "done"}`));
 $("github-accept").onclick = () => githubAction($("github-accept"), "github/accept", {}, () =>
   githubResult("The current repositories are now the ones the check expects."));
 $("github-disconnect").onclick = () => {
   const revoke = githubRevokeUrl || githubStatus?.revoke_url || "";
-  if (!window.confirm("Disconnect GitHub? The assistant can no longer fetch, pull or push until you connect again.")) return;
+  if (!window.confirm("Sign out of GitHub? The assistant can no longer fetch, pull or push until you sign in again.")) return;
   githubAction($("github-disconnect"), "github/disconnect", {}, () => {
     const result = $("github-result");
     result.classList.remove("error");
-    result.replaceChildren(textNode("span", "Disconnect forgets the sign-in on this box. To revoke it on GitHub, open this link: "));
+    result.replaceChildren(textNode("span", "Sign out forgets the sign-in on this box. To revoke it on GitHub, open this link: "));
     const link = githubLink(revoke, revoke.replace(/^https:\/\//, ""));
     if (link) result.append(link);
   });

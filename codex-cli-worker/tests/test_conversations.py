@@ -426,7 +426,9 @@ class ConversationTests(unittest.TestCase):
     def test_prompt_names_the_api_address_only_when_codex_has_a_token(self):
         """With the HA_TOKEN option exchange_info tells Codex to call Home Assistant at HA_URL; without it, nothing is said."""
         self.assertNotIn("home_assistant_api", server.exchange_info("task", None))
-        self.assertNotIn("HA_URL", server.PAGE_INSTRUCTIONS)
+        # The fixed rules name HA_URL only to forbid calling it; the address and the token header come with the token.
+        self.assertNotIn("$HA_URL/api", server.PAGE_INSTRUCTIONS)
+        self.assertNotIn("Authorization: Bearer", server.PAGE_INSTRUCTIONS)
         with patch.object(server, "read_options", return_value={"HA_TOKEN": "token-value"}):
             prompt = server.exchange_info("task", None)["home_assistant_api"]
         # From 0.3.6 a reload goes through the call tool; the token is only for an API call that is not a service.
