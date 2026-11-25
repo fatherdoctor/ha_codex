@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
+from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
@@ -50,7 +50,10 @@ class UnreferencedImageTests(unittest.TestCase):
 
     def test_a_path_from_the_root_counts(self) -> None:
         self.add("screenshots/chat.png")
-        self.add("codex-cli-worker/README.md", "![chat](https://example.invalid/main/screenshots/chat.png)\n")
+        self.add(
+            "codex-cli-worker/README.md",
+            "![chat](https://example.invalid/main/screenshots/chat.png)\n",
+        )
         self.assertEqual(self.unused(), [])
 
     def test_a_path_from_the_naming_files_folder_counts(self) -> None:
@@ -63,8 +66,13 @@ class UnreferencedImageTests(unittest.TestCase):
     def test_the_same_file_name_in_another_folder_does_not_count(self) -> None:
         # A test that writes /tmp/dots-phone.png does not use screenshots/review/dots-phone.png.
         self.add("screenshots/review/dots-phone.png")
-        self.add("tests/browser_dots.cjs", "page.screenshot({path: '/tmp/dots-phone.png'});\n")
-        self.add("tests/notes.md", "See icon-dots-phone.png and review/dots-phone.png.\n")
+        self.add(
+            "tests/browser_dots.cjs",
+            "page.screenshot({path: '/tmp/dots-phone.png'});\n",
+        )
+        self.add(
+            "tests/notes.md", "See icon-dots-phone.png and review/dots-phone.png.\n"
+        )
         self.assertEqual(self.unused(), ["screenshots/review/dots-phone.png"])
 
     def test_an_svg_does_not_use_itself(self) -> None:

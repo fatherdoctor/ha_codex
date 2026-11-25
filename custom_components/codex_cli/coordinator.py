@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timedelta
+import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -27,13 +27,18 @@ ISSUE_NOT_SIGNED_IN = "codex_not_signed_in"
 ISSUE_REMOTE_CONTROL_CHANGE = "remote_control_config_change"
 # Every repair issue the coordinator raises. They are not tied to the config entry, so unload and removal delete
 # them: an owner who removes the integration must not keep a "sign in" repair.
-REPAIR_ISSUES = (ISSUE_NOT_SIGNED_IN, ISSUE_REMOTE_CONTROL_CHANGE, ISSUE_GITHUB_ACCESS_LOST)
+REPAIR_ISSUES = (
+    ISSUE_NOT_SIGNED_IN,
+    ISSUE_REMOTE_CONTROL_CHANGE,
+    ISSUE_GITHUB_ACCESS_LOST,
+)
 
 
 def async_delete_repair_issues(hass: HomeAssistant) -> None:
     """Delete every repair issue this integration raises."""
     for issue_id in REPAIR_ISSUES:
         ir.async_delete_issue(hass, DOMAIN, issue_id)
+
 
 GITHUB_STATE_WORDS = {
     "near_expiry": "expires within 7 days",
@@ -50,9 +55,15 @@ def github_repair_key(state: str, kind: str) -> str:
     Sign in on the page starts a GitHub App sign-in, so a token connection is sent to the token form.
     """
     if state == "near_expiry":
-        return "github_access_near_expiry_token" if kind == "token" else "github_access_near_expiry"
+        return (
+            "github_access_near_expiry_token"
+            if kind == "token"
+            else "github_access_near_expiry"
+        )
     if state in ("expired", "revoked"):
-        return "github_access_lost_token" if kind == "token" else ISSUE_GITHUB_ACCESS_LOST
+        return (
+            "github_access_lost_token" if kind == "token" else ISSUE_GITHUB_ACCESS_LOST
+        )
     if state == "access_changed":
         return "github_access_changed"
     return "github_access_check_failed"
@@ -102,7 +113,11 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Create a repair issue if Codex CLI needs sign-in."""
         login = data.get("codex_login") or {}
         access = data.get("account_access")
-        needs_sign_in = access.get("needs_sign_in") if isinstance(access, dict) else not login.get("status_ok")
+        needs_sign_in = (
+            access.get("needs_sign_in")
+            if isinstance(access, dict)
+            else not login.get("status_ok")
+        )
         if needs_sign_in is not True:
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_NOT_SIGNED_IN)
             return
@@ -160,14 +175,33 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if previous is not None and previous != state:
             # The worker fires the same event through the Core API; this copy, marked by its source, still
             # reaches house automations when that call failed. Names only, never a token.
-            self.hass.bus.async_fire(EVENT_GITHUB_ACCESS, {
-                "state": state, "previous_state": previous, "reason": reason, "account": login,
-                "missing": [str(item) for item in github.get("missing") or [] if isinstance(item, str)][:50],
-                "extra": [str(item) for item in github.get("extra") or [] if isinstance(item, str)][:50],
-                "permission_problem": github.get("permission_problem") if isinstance(github.get("permission_problem"), str) else None,
-                "expires_at": github.get("expires_at") if isinstance(github.get("expires_at"), str) else None,
-                "addon": "codex_cli_worker", "source": "integration",
-            })
+            self.hass.bus.async_fire(
+                EVENT_GITHUB_ACCESS,
+                {
+                    "state": state,
+                    "previous_state": previous,
+                    "reason": reason,
+                    "account": login,
+                    "missing": [
+                        str(item)
+                        for item in github.get("missing") or []
+                        if isinstance(item, str)
+                    ][:50],
+                    "extra": [
+                        str(item)
+                        for item in github.get("extra") or []
+                        if isinstance(item, str)
+                    ][:50],
+                    "permission_problem": github.get("permission_problem")
+                    if isinstance(github.get("permission_problem"), str)
+                    else None,
+                    "expires_at": github.get("expires_at")
+                    if isinstance(github.get("expires_at"), str)
+                    else None,
+                    "addon": "codex_cli_worker",
+                    "source": "integration",
+                },
+            )
         if state in GITHUB_ERROR_STATES:
             severity = ir.IssueSeverity.ERROR
         elif state in GITHUB_WARNING_STATES:

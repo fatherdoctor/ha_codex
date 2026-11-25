@@ -1,12 +1,13 @@
 """Characterize the warm host's public interface with an in-memory app server."""
-import sys
-import unittest
+
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
+import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import codex_host  # noqa: E402
-from test_codex_host import FakeSession, HostTest, TOOLS, wait_until  # noqa: E402
+from test_codex_host import TOOLS, FakeSession, HostTest, wait_until  # noqa: E402
 
 
 class FingerprintsAndFiles(unittest.TestCase):
@@ -14,8 +15,10 @@ class FingerprintsAndFiles(unittest.TestCase):
         before = codex_host.fingerprint({"b": {"z": 1, "a": 2}, "a": [1, 2]})
         reordered = codex_host.fingerprint({"a": [1, 2], "b": {"a": 2, "z": 1}})
         self.assertEqual(before, reordered)
-        self.assertEqual(codex_host.changed_rows(before, codex_host.fingerprint({"b": {}, "c": 3})),
-                         ["a", "b", "c"])
+        self.assertEqual(
+            codex_host.changed_rows(before, codex_host.fingerprint({"b": {}, "c": 3})),
+            ["a", "b", "c"],
+        )
         self.assertTrue(all(len(value) == 64 for value in before.values()))
 
     def test_signature_handles_missing_and_changed_files(self):

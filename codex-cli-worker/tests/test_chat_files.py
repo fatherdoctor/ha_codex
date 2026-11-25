@@ -1,13 +1,14 @@
 """The chat's files folder: what Codex saves there for the person to download, and nothing else (CX-FILE-LINK)."""
+
 from __future__ import annotations
 
+from contextlib import ExitStack
 import io
 import os
+from pathlib import Path
 import tempfile
 import threading
 import unittest
-from contextlib import ExitStack
-from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
@@ -23,9 +24,19 @@ class ChatFilesTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        self.stack.enter_context(patch.dict(server.tasks, {TASK_ID: {"task_id": TASK_ID, "status": "completed"}}, clear=True))
-        self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
-        self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
+        self.stack.enter_context(
+            patch.dict(
+                server.tasks,
+                {TASK_ID: {"task_id": TASK_ID, "status": "completed"}},
+                clear=True,
+            )
+        )
+        self.stack.enter_context(
+            patch.object(server, "task_root", return_value=self.root / "tasks")
+        )
+        self.stack.enter_context(
+            patch.object(server, "api_token", return_value="test-token")
+        )
         self.stack.enter_context(patch.object(server, "write_task_log"))
         self.task_dir = self.root / "tasks" / TASK_ID
         self.task_dir.mkdir(parents=True)
@@ -43,7 +54,9 @@ class ChatFilesTests(unittest.TestCase):
 
     def get(self, relative):
         """Ask the worker for one file of the chat's files folder."""
-        return self.client.get(f"/tasks/{TASK_ID}/files/{relative}", headers=self.headers)
+        return self.client.get(
+            f"/tasks/{TASK_ID}/files/{relative}", headers=self.headers
+        )
 
     def test_listing_names_regular_files_only(self):
         """Hidden names and links are left out, so the page never offers them."""
@@ -53,15 +66,22 @@ class ChatFilesTests(unittest.TestCase):
         (folder / ".cache" / "inside.txt").write_text("hidden folder")
         (folder / "task-link.json").symlink_to(self.task_dir / "task.json")
         (folder / "outside").symlink_to(self.task_dir, target_is_directory=True)
-        self.assertEqual(server.chat_files(TASK_ID), {
-            "folder": str(folder), "files": [{"path": "2025/visits.xlsx", "size": 11}]})
+        self.assertEqual(
+            server.chat_files(TASK_ID),
+            {
+                "folder": str(folder),
+                "files": [{"path": "2025/visits.xlsx", "size": 11}],
+            },
+        )
 
     def test_listing_is_capped(self):
         """A folder with very many files lists only the first CHAT_FILES_LIST_MAX of them."""
         folder = self.make_folder()
         for index in range(server.CHAT_FILES_LIST_MAX + 5):
             (folder / f"part-{index:03}.csv").write_text("a")
-        self.assertEqual(len(server.chat_files(TASK_ID)["files"]), server.CHAT_FILES_LIST_MAX)
+        self.assertEqual(
+            len(server.chat_files(TASK_ID)["files"]), server.CHAT_FILES_LIST_MAX
+        )
 
     def test_no_folder_lists_nothing(self):
         """A chat that never ran a message since this version has no folder and no listing."""
@@ -70,7 +90,9 @@ class ChatFilesTests(unittest.TestCase):
 
     def test_a_folder_that_is_a_link_is_refused(self):
         """If the folder itself is a link, it is never listed, served or made writable."""
-        (self.task_dir / server.CHAT_FILES_DIR).symlink_to(self.root, target_is_directory=True)
+        (self.task_dir / server.CHAT_FILES_DIR).symlink_to(
+            self.root, target_is_directory=True
+        )
         (self.root / "secret.txt").write_text("outside")
         self.assertFalse(server.prepare_chat_files_dir(TASK_ID))
         self.assertIsNone(server.chat_files(TASK_ID))
@@ -84,7 +106,9 @@ class ChatFilesTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, b"PK invented")
         self.assertEqual(response.mimetype, "application/octet-stream")
-        self.assertTrue(response.headers["Content-Disposition"].startswith("attachment;"))
+        self.assertTrue(
+            response.headers["Content-Disposition"].startswith("attachment;")
+        )
         self.assertIn("visits.xlsx", response.headers["Content-Disposition"])
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
         self.assertEqual(response.headers["Cache-Control"], "no-store")
@@ -96,14 +120,29 @@ class ChatFilesTests(unittest.TestCase):
         (folder / ".notes.txt").write_text("hidden")
         (folder / "task-link.json").symlink_to(self.task_dir / "task.json")
         (folder / "linked").symlink_to(self.task_dir, target_is_directory=True)
-        for relative in ["../task.json", "2025/../../task.json", "%2E%2E/task.json", ".notes.txt", "task-link.json",
-                         "linked/task.json", "2025", "missing.xlsx", ""]:
+        for relative in [
+            "../task.json",
+            "2025/../../task.json",
+            "%2E%2E/task.json",
+            ".notes.txt",
+            "task-link.json",
+            "linked/task.json",
+            "2025",
+            "missing.xlsx",
+            "",
+        ]:
             with self.subTest(relative=relative):
                 self.assertEqual(self.get(relative).status_code, 404)
         self.assertIsNone(server.open_chat_file(TASK_ID, "/etc/hostname"))
-        self.assertEqual(self.client.get("/tasks/other-chat/files/2025/visits.xlsx", headers=self.headers).status_code,
-                         404)
-        self.assertEqual(self.client.get(f"/tasks/{TASK_ID}/files/2025/visits.xlsx").status_code, 401)
+        self.assertEqual(
+            self.client.get(
+                "/tasks/other-chat/files/2025/visits.xlsx", headers=self.headers
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(f"/tasks/{TASK_ID}/files/2025/visits.xlsx").status_code, 401
+        )
 
     def test_open_checks_the_opened_file_again(self):
         """A file swapped for a link after the path was checked is still refused: the open does not follow it."""
@@ -123,8 +162,13 @@ class ChatFilesTests(unittest.TestCase):
         os.mkfifo(folder / "pipe")
         done = threading.Event()
         result = []
-        thread = threading.Thread(target=lambda: (result.append(server.open_chat_file(TASK_ID, "pipe")), done.set()),
-                                  daemon=True)
+        thread = threading.Thread(
+            target=lambda: (
+                result.append(server.open_chat_file(TASK_ID, "pipe")),
+                done.set(),
+            ),
+            daemon=True,
+        )
         thread.start()
         self.assertTrue(done.wait(3), "open_chat_file blocked on a named pipe")
         self.assertEqual(result, [None])
@@ -137,14 +181,41 @@ class ChatFilesTests(unittest.TestCase):
         final = self.task_dir / "turns" / "t1" / "final.json"
         final.parent.mkdir(parents=True)
         options = {**server.DEFAULT_OPTIONS, "codex_sandbox": "workspace-write"}
-        with patch.object(server, "task_mode_settings", return_value={
-                "sandbox": "workspace-write", "approval_policy": "on-request", "approvals_reviewer": "user"}):
-            session = server.create_approval_session(TASK_ID, proc, "Make a table", final, None, {}, options)
-        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"],
-                         ["/homeassistant", "/share", "/media", "/media/.agents", "/addon_config", str(folder)])
-        with patch.object(server, "task_mode_settings", return_value={
-                "sandbox": "read-only", "approval_policy": "on-request", "approvals_reviewer": "user"}):
-            reader = server.create_approval_session(TASK_ID, proc, "Read", final, None, {}, options)
+        with patch.object(
+            server,
+            "task_mode_settings",
+            return_value={
+                "sandbox": "workspace-write",
+                "approval_policy": "on-request",
+                "approvals_reviewer": "user",
+            },
+        ):
+            session = server.create_approval_session(
+                TASK_ID, proc, "Make a table", final, None, {}, options
+            )
+        self.assertEqual(
+            session.turn_params["sandboxPolicy"]["writableRoots"],
+            [
+                "/homeassistant",
+                "/share",
+                "/media",
+                "/media/.agents",
+                "/addon_config",
+                str(folder),
+            ],
+        )
+        with patch.object(
+            server,
+            "task_mode_settings",
+            return_value={
+                "sandbox": "read-only",
+                "approval_policy": "on-request",
+                "approvals_reviewer": "user",
+            },
+        ):
+            reader = server.create_approval_session(
+                TASK_ID, proc, "Read", final, None, {}, options
+            )
         self.assertNotIn("writableRoots", reader.turn_params["sandboxPolicy"])
 
     def test_codex_is_told_where_to_save_files(self):
@@ -159,11 +230,16 @@ class ChatFilesTests(unittest.TestCase):
     def test_task_payload_carries_the_listing(self):
         """The page reads the listing from GET /tasks/<id> to turn links into download cards."""
         folder = self.make_folder()
-        with patch.object(server, "retention_context", return_value=None), \
-                patch.object(server, "task_payload", return_value={"task_id": TASK_ID}):
+        with (
+            patch.object(server, "retention_context", return_value=None),
+            patch.object(server, "task_payload", return_value={"task_id": TASK_ID}),
+        ):
             data = self.client.get(f"/tasks/{TASK_ID}", headers=self.headers).get_json()
         self.assertEqual(data["task"]["chat_files"]["folder"], str(folder))
-        self.assertEqual(os.path.basename(data["task"]["chat_files"]["files"][0]["path"]), "visits.xlsx")
+        self.assertEqual(
+            os.path.basename(data["task"]["chat_files"]["files"][0]["path"]),
+            "visits.xlsx",
+        )
 
 
 if __name__ == "__main__":

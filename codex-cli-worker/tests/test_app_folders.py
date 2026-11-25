@@ -1,24 +1,28 @@
 """The guard that keeps tests off the app's real /data, /homeassistant and /addon_config folders."""
+
 import os
+from pathlib import Path
 import re
 import tempfile
 import unittest
-from pathlib import Path
 
-from app_folders import REAL_ROOTS, changes, isolated_app_folders, snapshot
 from test_server import server
+from app_folders import REAL_ROOTS, changes, isolated_app_folders, snapshot
 
 TESTS = Path(__file__).resolve().parent
 
 
 def real_paths(module) -> dict[str, Path]:
     """Return the module-level paths of module that are below a real root."""
-    return {name: value for name, value in vars(module).items()
-            if isinstance(value, Path) and any(value == root or root in value.parents for root in REAL_ROOTS)}
+    return {
+        name: value
+        for name, value in vars(module).items()
+        if isinstance(value, Path)
+        and any(value == root or root in value.parents for root in REAL_ROOTS)
+    }
 
 
 class IsolatedFolders(unittest.TestCase):
-
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -33,9 +37,15 @@ class IsolatedFolders(unittest.TestCase):
             self.assertEqual(real_paths(server), {})
             self.assertEqual(server.DATA_ROOT, self.base / "data")
             self.assertEqual(server.CODEX_HOME, self.base / "data" / "codex-home")
-            self.assertEqual(server.OLD_AUTH_QR_DIR, self.base / "homeassistant" / "www" / "codex_cli_auth")
+            self.assertEqual(
+                server.OLD_AUTH_QR_DIR,
+                self.base / "homeassistant" / "www" / "codex_cli_auth",
+            )
             self.assertEqual(server.task_root(), self.base / "data" / "codex_tasks")
-            self.assertEqual(server.interaction_logs.path, self.base / "data" / "interaction-diagnostics.json")
+            self.assertEqual(
+                server.interaction_logs.path,
+                self.base / "data" / "interaction-diagnostics.json",
+            )
         self.assertEqual(real_paths(server), before)
 
     def test_the_replacements_end_when_the_stack_closes(self):
@@ -46,7 +56,6 @@ class IsolatedFolders(unittest.TestCase):
 
 
 class Snapshot(unittest.TestCase):
-
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -83,7 +92,11 @@ class EveryStartTestIsIsolated(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             if re.search(r"\bserver\.main\(\)", text):
                 runs_main.append(path.name)
-                self.assertIn("isolated_app_folders(server,", text, f"{path.name} runs server.main() on the real folders")
+                self.assertIn(
+                    "isolated_app_folders(server,",
+                    text,
+                    f"{path.name} runs server.main() on the real folders",
+                )
         self.assertIn("test_agents_home.py", runs_main)
 
 

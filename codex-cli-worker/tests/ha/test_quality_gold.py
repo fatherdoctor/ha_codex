@@ -1,15 +1,16 @@
 """The Gold checklist claims `devices` and `repair-issues` in quality_scale.yaml, held by the code."""
+
 import importlib
 import importlib.util
-import sys
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceEntryType
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 ROOT = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
@@ -26,15 +27,23 @@ ISSUES = ("codex_not_signed_in", "remote_control_config_change", "github_access_
 
 
 def add_entry(hass, state=ConfigEntryState.LOADED):
-    entry = MockConfigEntry(domain="codex_cli", data={"base_url": "http://worker"}, state=state)
+    entry = MockConfigEntry(
+        domain="codex_cli", data={"base_url": "http://worker"}, state=state
+    )
     entry.add_to_hass(hass)
     return entry
 
 
 def raise_every_issue(hass):
     for issue_id in ISSUES:
-        ir.async_create_issue(hass, "codex_cli", issue_id, is_fixable=False, severity=ir.IssueSeverity.WARNING,
-                              translation_key=issue_id)
+        ir.async_create_issue(
+            hass,
+            "codex_cli",
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=issue_id,
+        )
 
 
 async def entities_of(hass, platform):
@@ -52,7 +61,9 @@ async def test_every_entity_is_on_a_service_device(hass, platform):
     entities = await entities_of(hass, platform)
     assert entities
     for entity in entities:
-        assert entity.device_info["entry_type"] is DeviceEntryType.SERVICE, type(entity).__name__
+        assert entity.device_info["entry_type"] is DeviceEntryType.SERVICE, type(
+            entity
+        ).__name__
 
 
 async def test_unload_deletes_every_repair_issue(hass):
@@ -70,7 +81,9 @@ async def test_failed_unload_keeps_the_repairs(hass):
     """A platform that refuses to unload leaves the integration running, so its repairs stay true."""
     entry = add_entry(hass)
     raise_every_issue(hass)
-    with patch.object(hass.config_entries, "async_unload_platforms", return_value=False):
+    with patch.object(
+        hass.config_entries, "async_unload_platforms", return_value=False
+    ):
         assert not await integration.async_unload_entry(hass, entry)
     registry = ir.async_get(hass)
     assert all(registry.async_get_issue("codex_cli", i) for i in ISSUES)
@@ -87,11 +100,15 @@ async def test_removal_deletes_every_repair_issue(hass):
 
 def test_the_list_names_every_issue_the_coordinator_raises():
     """A new repair added to the coordinator must join REPAIR_ISSUES, or unload would leave it behind."""
-    assert (ROOT / "coordinator.py").read_text().count("ir.async_create_issue(") == len(ISSUES)
+    assert (ROOT / "coordinator.py").read_text().count("ir.async_create_issue(") == len(
+        ISSUES
+    )
     assert set(coordinator_module.REPAIR_ISSUES) == set(ISSUES)
 
 
-@pytest.mark.parametrize("state", [s for s in ConfigEntryState if s is not ConfigEntryState.LOADED])
+@pytest.mark.parametrize(
+    "state", [s for s in ConfigEntryState if s is not ConfigEntryState.LOADED]
+)
 async def test_one_helper_picks_only_loaded_entries(hass, state):
     """Actions and the Core log view pick an entry through one helper, and it skips every entry not loaded."""
     idle = add_entry(hass, state)
@@ -100,4 +117,10 @@ async def test_one_helper_picks_only_loaded_entries(hass, state):
     loaded.runtime_data = "loaded"
     assert list(core_logs.loaded_runtime_data(hass)) == ["loaded"]
     assert "loaded_runtime_data(" in (ROOT / "__init__.py").read_text()
-    assert "async_entries(" not in (ROOT / "__init__.py").read_text().split("def _first_runtime", 1)[1].split("\ndef ", 1)[0]
+    assert (
+        "async_entries("
+        not in (ROOT / "__init__.py")
+        .read_text()
+        .split("def _first_runtime", 1)[1]
+        .split("\ndef ", 1)[0]
+    )

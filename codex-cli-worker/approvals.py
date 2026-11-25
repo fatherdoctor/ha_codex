@@ -12,11 +12,10 @@ import json
 import re
 import threading
 import time
-import uuid
 from typing import Any, Callable, TextIO
+import uuid
 
 import hass_mcp
-
 
 APPROVAL_GONE = "This permission request is no longer waiting for an answer."
 DISPLAY_LIMIT = 32000
@@ -31,13 +30,19 @@ TOOL_APPROVAL = "mcpServer/elicitation/request"
 # registers as home_assistant_call, and the write tools of the bundled Home Assistant MCP server (hass_mcp.py), which
 # Codex asks about before each call. The tools of the ChatGPT apps get a card too (app_tool_request). A question from
 # any other server or tool is still declined (_elicitation_refusal).
-TOOL_CARDS = frozenset({("home_assistant_call", "call"),
-                        *((hass_mcp.SERVER_NAME, tool) for tool in hass_mcp.WRITE_TOOLS)})
+TOOL_CARDS = frozenset(
+    {
+        ("home_assistant_call", "call"),
+        *((hass_mcp.SERVER_NAME, tool) for tool in hass_mcp.WRITE_TOOLS),
+    }
+)
 
 # Codex 0.166.0 asks before a tool call with a form whose _meta has codex_approval_kind "mcp_tool_call" and the full
 # arguments in tool_params. The tool name is only in its message, which for a tool outside the ChatGPT apps is always
 # this sentence (codex-rs/core/src/mcp_tool_call.rs, build_mcp_tool_approval_fallback_message).
-_TOOL_QUESTION = re.compile(r'Allow the ([A-Za-z0-9_-]{1,64}) MCP server to run tool "([A-Za-z0-9_-]{1,64})"\?')
+_TOOL_QUESTION = re.compile(
+    r'Allow the ([A-Za-z0-9_-]{1,64}) MCP server to run tool "([A-Za-z0-9_-]{1,64})"\?'
+)
 
 
 _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -48,7 +53,9 @@ _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 # request?" (codex-rs/core/src/mcp_tool_approval_templates.rs at rust-v0.166.0). So the tool is named from the
 # message when it has the first form, else from the tool title in _meta.
 CODEX_APPS_SERVER = "codex_apps"
-_APP_TOOL_QUESTION = re.compile(r'Allow .{1,64} to run tool "([A-Za-z0-9_.-]{1,128})"\?')
+_APP_TOOL_QUESTION = re.compile(
+    r'Allow .{1,64} to run tool "([A-Za-z0-9_.-]{1,128})"\?'
+)
 # An app or tool title is shown only when it is a short plain name; anything else reads as the generic word.
 _PLAIN_TITLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.()-]{0,63}")
 # The log line names a tool in the characters of the first-form tool name only, so a title with spaces and a period
@@ -59,7 +66,11 @@ _NOT_LOG_NAME = re.compile(r"[^A-Za-z0-9_.-]")
 def _elicitation_refusal(params: dict[str, Any]) -> str:
     """Name the tool server, when it has a plain name, in the refusal shown in the chat."""
     name = params.get("serverName")
-    source = f"The {name} tool" if isinstance(name, str) and _SERVER_NAME.fullmatch(name) else "A tool"
+    source = (
+        f"The {name} tool"
+        if isinstance(name, str) and _SERVER_NAME.fullmatch(name)
+        else "A tool"
+    )
     return f"{source} asked a question this page cannot show, so it was declined and nothing was changed."
 
 
@@ -67,14 +78,22 @@ def decision_result(kind: str, allow: bool) -> dict[str, Any]:
     """The reply Codex reads for a request of this kind: a tool's form, or a command's or file change's decision."""
     if kind == "tool":
         # Accept with no remember option is one approval; Codex asks again before the next call.
-        return {"action": "accept" if allow else "decline", "content": None, "_meta": None}
+        return {
+            "action": "accept" if allow else "decline",
+            "content": None,
+            "_meta": None,
+        }
     return {"decision": "accept" if allow else "decline"}
 
 
 def _is_tool_question(params: dict[str, Any]) -> bool:
     """True when this is Codex's own form before a tool call, not a question that a tool server asks."""
     meta = params.get("_meta")
-    return params.get("mode") == "form" and isinstance(meta, dict) and meta.get("codex_approval_kind") == "mcp_tool_call"
+    return (
+        params.get("mode") == "form"
+        and isinstance(meta, dict)
+        and meta.get("codex_approval_kind") == "mcp_tool_call"
+    )
 
 
 def plain_title(value: Any) -> str:
@@ -89,7 +108,11 @@ def tool_request(params: dict[str, Any]) -> tuple[str, str] | None:
         return None
     question = _TOOL_QUESTION.fullmatch(str(params.get("message") or ""))
     server = params.get("serverName")
-    if not question or question.group(1) != server or (server, question.group(2)) not in TOOL_CARDS:
+    if (
+        not question
+        or question.group(1) != server
+        or (server, question.group(2)) not in TOOL_CARDS
+    ):
         return None
     return server, question.group(2)
 
@@ -109,20 +132,46 @@ _SERVICE_PATH = re.compile(r"/api/services/([a-z0-9_]+)/([a-z0-9_]+)")
 _SERVICE_WORDS = {"turn_on": "turns on", "turn_off": "turns off", "toggle": "toggles"}
 
 _RELOADS = {
-    ("automation", "reload"): ("Reload the automations.", "Automations read their configuration again; none is run by this step."),
-    ("script", "reload"): ("Reload the scripts.", "Scripts read their configuration again; none is run by this step."),
-    ("scene", "reload"): ("Reload the scenes.", "Scenes read their configuration again; none is applied by this step."),
-    ("homeassistant", "restart"): ("Restart Home Assistant.", "Home Assistant is unavailable for a minute or two."),
+    ("automation", "reload"): (
+        "Reload the automations.",
+        "Automations read their configuration again; none is run by this step.",
+    ),
+    ("script", "reload"): (
+        "Reload the scripts.",
+        "Scripts read their configuration again; none is run by this step.",
+    ),
+    ("scene", "reload"): (
+        "Reload the scenes.",
+        "Scenes read their configuration again; none is applied by this step.",
+    ),
+    ("homeassistant", "restart"): (
+        "Restart Home Assistant.",
+        "Home Assistant is unavailable for a minute or two.",
+    ),
 }
 
 _FILE_EFFECTS = (
-    (re.compile(r"(^|/)automations\.yaml$"), "Your automations change once automations are reloaded."),
-    (re.compile(r"(^|/)scripts\.yaml$"), "Your scripts change once scripts are reloaded."),
+    (
+        re.compile(r"(^|/)automations\.yaml$"),
+        "Your automations change once automations are reloaded.",
+    ),
+    (
+        re.compile(r"(^|/)scripts\.yaml$"),
+        "Your scripts change once scripts are reloaded.",
+    ),
     (re.compile(r"(^|/)scenes\.yaml$"), "Your scenes change once scenes are reloaded."),
-    (re.compile(r"(^|/)\.storage/lovelace"), "A dashboard changes; open it to see the change."),
-    (re.compile(r"(^|/)(configuration\.yaml|packages/.+\.ya?ml)$"),
-     "Home Assistant's configuration changes; most parts take effect after a reload or a restart."),
-    (re.compile(r"\.ya?ml$"), "A configuration file changes; it takes effect when Home Assistant next reads it."),
+    (
+        re.compile(r"(^|/)\.storage/lovelace"),
+        "A dashboard changes; open it to see the change.",
+    ),
+    (
+        re.compile(r"(^|/)(configuration\.yaml|packages/.+\.ya?ml)$"),
+        "Home Assistant's configuration changes; most parts take effect after a reload or a restart.",
+    ),
+    (
+        re.compile(r"\.ya?ml$"),
+        "A configuration file changes; it takes effect when Home Assistant next reads it.",
+    ),
 )
 
 _KIND_WORDS = {"add": "Create", "update": "Change", "delete": "Delete"}
@@ -134,7 +183,10 @@ def _entity_ids(text: str) -> list[str]:
     """Return the entity ids a command names, in order, without repeats."""
     return list(dict.fromkeys(_ENTITY_ID.findall(text)))
 
-def _service_confirmation(domain: str, service: str, targets: list[str]) -> dict[str, str]:
+
+def _service_confirmation(
+    domain: str, service: str, targets: list[str]
+) -> dict[str, str]:
     """Plain words for one Home Assistant action on the named targets, or on all it reaches when none is named."""
     if (domain, service) in _RELOADS:
         what, effect = _RELOADS[(domain, service)]
@@ -143,9 +195,13 @@ def _service_confirmation(domain: str, service: str, targets: list[str]) -> dict
     verb = _SERVICE_WORDS.get(service, f"runs {domain}.{service} on")
     if domain == "scene" and service == "turn_on":
         verb = "applies"
-    return {"what": f"Run the Home Assistant action {domain}.{service}.",
-            "where": (where[0].upper() + where[1:] if where.startswith("every ") else where) + ".",
-            "effect": f"This {verb} {where}."}
+    return {
+        "what": f"Run the Home Assistant action {domain}.{service}.",
+        "where": (where[0].upper() + where[1:] if where.startswith("every ") else where)
+        + ".",
+        "effect": f"This {verb} {where}.",
+    }
+
 
 def _command_confirmation(command: str, cwd: str, network: str) -> dict[str, str]:
     """Plain words for a command: a Home Assistant action when one is named, else the command itself."""
@@ -153,16 +209,32 @@ def _command_confirmation(command: str, cwd: str, network: str) -> dict[str, str
     call = _SERVICE_PATH.search(lower)
     if call:
         domain = call.group(1)
-        targets = [entity for entity in _entity_ids(lower) if entity.split(".")[0] == domain] or _entity_ids(lower)
+        targets = [
+            entity for entity in _entity_ids(lower) if entity.split(".")[0] == domain
+        ] or _entity_ids(lower)
         return _service_confirmation(domain, call.group(2), targets)
-    where = f"In {cwd}" + (f", reaching {network}" if network else "") + "." if cwd else "On this Home Assistant."
-    return {"what": "Run one command outside the sandbox, shown below.", "where": where,
-            "effect": "Only what that command does; it may read files and use the network."}
+    where = (
+        f"In {cwd}" + (f", reaching {network}" if network else "") + "."
+        if cwd
+        else "On this Home Assistant."
+    )
+    return {
+        "what": "Run one command outside the sandbox, shown below.",
+        "where": where,
+        "effect": "Only what that command does; it may read files and use the network.",
+    }
+
 
 _SERVICE_NAME = re.compile(r"([a-z0-9_]+)\.([a-z0-9_]+)")
 
 # The id fields a target can hold besides entity_id, and how the card names each of their ids.
-_TARGET_WORDS = {"device_id": "of device", "area_id": "in area", "floor_id": "on floor", "label_id": "with label"}
+_TARGET_WORDS = {
+    "device_id": "of device",
+    "area_id": "in area",
+    "floor_id": "on floor",
+    "label_id": "with label",
+}
+
 
 def _target_names(domain: str, target: Any) -> list[str]:
     """Name every id the target holds, so the card says no less than the call reaches.
@@ -185,12 +257,17 @@ def _target_names(domain: str, target: Any) -> list[str]:
             names += [f"every {domain} {_TARGET_WORDS[key]} {item}" for item in ids]
     return names
 
+
 # The target fields a Home Assistant action's data can hold at its top level.
 _TARGET_FIELDS = ("entity_id", *_TARGET_WORDS)
 
+
 def _data_targets(domain: str, data: dict[str, Any]) -> list[str]:
     """Name what an action reaches from the target fields at the top level of its data (the REST API's form)."""
-    return _target_names(domain, {key: data[key] for key in _TARGET_FIELDS if key in data})
+    return _target_names(
+        domain, {key: data[key] for key in _TARGET_FIELDS if key in data}
+    )
+
 
 _SERVICE_NAME_PART = re.compile(r"[a-z0-9_]+")
 
@@ -208,6 +285,7 @@ _DASHBOARD_WORDS = {
     "update_view": "Change a view of a dashboard.",
     "restore_dashboard": "Restore a dashboard from one of its backups.",
 }
+
 
 def _hass_mcp_confirmation(tool: str, parsed: Any) -> dict[str, str] | None:
     """Plain words for a write tool of the Home Assistant MCP server, or None when the arguments do not fit its form.
@@ -227,17 +305,30 @@ def _hass_mcp_confirmation(tool: str, parsed: Any) -> dict[str, str] | None:
         if not service or not isinstance(params, dict):
             return None
         domain = entity_id.split(".")[0]
-        return _service_confirmation(domain, service, _data_targets(domain, {"entity_id": entity_id, **params}))
+        return _service_confirmation(
+            domain, service, _data_targets(domain, {"entity_id": entity_id, **params})
+        )
     if tool == "call_service_tool":
-        domain, service, data = arguments.get("domain"), arguments.get("service"), arguments.get("data") or {}
-        if not all(isinstance(name, str) and _SERVICE_NAME_PART.fullmatch(name) for name in (domain, service)):
+        domain, service, data = (
+            arguments.get("domain"),
+            arguments.get("service"),
+            arguments.get("data") or {},
+        )
+        if not all(
+            isinstance(name, str) and _SERVICE_NAME_PART.fullmatch(name)
+            for name in (domain, service)
+        ):
             return None
         if not isinstance(data, dict):
             return None
         return _service_confirmation(domain, service, _data_targets(domain, data))
     if tool in _DASHBOARD_WORDS:
         url_path = arguments.get("url_path")
-        where = f"The dashboard {url_path}." if isinstance(url_path, str) and url_path else "The default dashboard."
+        where = (
+            f"The dashboard {url_path}."
+            if isinstance(url_path, str) and url_path
+            else "The default dashboard."
+        )
         if arguments.get("dry_run") is True:
             effect = "Nothing changes: this is a dry run that only shows what the change would be."
         else:
@@ -262,9 +353,14 @@ def _tool_confirmation(tool: str, arguments: str) -> dict[str, str]:
     if call:
         # Only the target names what the action reaches; an entity id inside data (a message, say) is not one.
         domain = call.group(1)
-        return _service_confirmation(domain, call.group(2), _target_names(domain, parsed.get("target")))
-    return {"what": f"Run the tool {tool}, with the arguments shown below.", "where": "This Home Assistant.",
-            "effect": "Only what the tool does with these arguments."}
+        return _service_confirmation(
+            domain, call.group(2), _target_names(domain, parsed.get("target"))
+        )
+    return {
+        "what": f"Run the tool {tool}, with the arguments shown below.",
+        "where": "This Home Assistant.",
+        "effect": "Only what the tool does with these arguments.",
+    }
 
 
 def _app_tool_confirmation(record: dict[str, Any]) -> dict[str, str]:
@@ -274,34 +370,61 @@ def _app_tool_confirmation(record: dict[str, Any]) -> dict[str, str]:
     effect = "Only what the app does with these arguments, in that service, outside this Home Assistant."
     if record.get("question"):
         effect = f"Codex asks: {record['question']} " + effect
-    return {"what": f"Let {app} run its tool {tool}, with the arguments shown below.",
-            "where": f"Your {app} account, connected through your ChatGPT sign-in.", "effect": effect}
+    return {
+        "what": f"Let {app} run its tool {tool}, with the arguments shown below.",
+        "where": f"Your {app} account, connected through your ChatGPT sign-in.",
+        "effect": effect,
+    }
 
 
 def _file_effect(paths: list[str]) -> str:
     """The plain effect of changing these files: the most specific one that applies to each, without repeats."""
     effects: list[str] = []
     for path in paths:
-        effect = next((text for pattern, text in _FILE_EFFECTS if pattern.search(path)), "The file changes.")
+        effect = next(
+            (text for pattern, text in _FILE_EFFECTS if pattern.search(path)),
+            "The file changes.",
+        )
         if effect not in effects:
             effects.append(effect)
     return " ".join(effects)
 
+
 def _changes_confirmation(changes: list[dict[str, Any]]) -> dict[str, str]:
     """Plain words for a file change: create, change or delete, which files, and what that does."""
     present = {str(change.get("kind") or "update") for change in changes}
-    verbs = " and ".join(word.lower() for kind, word in _KIND_WORDS.items() if kind in present) or "change"
-    paths = list(dict.fromkeys(str(change[key]) for change in changes for key in ("path", "move_path") if change.get(key)))
+    verbs = (
+        " and ".join(
+            word.lower() for kind, word in _KIND_WORDS.items() if kind in present
+        )
+        or "change"
+    )
+    paths = list(
+        dict.fromkeys(
+            str(change[key])
+            for change in changes
+            for key in ("path", "move_path")
+            if change.get(key)
+        )
+    )
     count = len(changes)
     what = f"{verbs[0].upper() + verbs[1:]} {count} file{'s' if count != 1 else ''}."
-    return {"what": what, "where": (", ".join(paths) + ".") if paths else "Not given.", "effect": _file_effect(paths)}
+    return {
+        "what": what,
+        "where": (", ".join(paths) + ".") if paths else "Not given.",
+        "effect": _file_effect(paths),
+    }
 
 
 def confirmation(record: dict[str, Any]) -> dict[str, str]:
     """Describe the redacted action without making or suppressing its approval decision."""
     if record["kind"] == "command":
-        text = _command_confirmation(record["command"], record["cwd"], record.get("network", ""))
-    elif record["kind"] == "tool" and record["tool"].startswith(CODEX_APPS_SERVER + "."):
+        text = _command_confirmation(
+            record["command"], record["cwd"], record.get("network", "")
+        )
+    elif record["kind"] == "tool" and record["tool"].startswith(
+        CODEX_APPS_SERVER + "."
+    ):
         text = _app_tool_confirmation(record)
     elif record["kind"] == "tool":
         text = _tool_confirmation(record["tool"], record["arguments"])
@@ -314,13 +437,18 @@ def confirmation(record: dict[str, Any]) -> dict[str, str]:
 
 # Codex's reviewer reports each review it makes in an Auto-review chat (app-server-protocol common.rs at
 # rust-v0.166.0). It sends no request: it allows or denies in place of the person.
-AUTO_REVIEW_EVENTS = {"item/autoApprovalReview/started", "item/autoApprovalReview/completed"}
+AUTO_REVIEW_EVENTS = {
+    "item/autoApprovalReview/started",
+    "item/autoApprovalReview/completed",
+}
 AUTO_REVIEW_STATUSES = {"inProgress", "approved", "denied", "timedOut", "aborted"}
 AUTO_REVIEW_RISKS = {"low", "medium", "high", "critical"}
 AUTO_REVIEW_RATIONALE_LIMIT = 500
 
 
-def auto_review_event(method: str, params: dict[str, Any], redact: Callable[[str], str]) -> dict[str, Any]:
+def auto_review_event(
+    method: str, params: dict[str, Any], redact: Callable[[str], str]
+) -> dict[str, Any]:
     """Return the chat event for one review by Codex's reviewer: its id, status, risk, what it checked and why.
 
     Only known words pass: an unknown status reads as "unknown" and is shown as
@@ -336,7 +464,9 @@ def auto_review_event(method: str, params: dict[str, Any], redact: Callable[[str
     elif status not in AUTO_REVIEW_STATUSES - {"inProgress"}:
         status = "unknown"
     risk = review.get("riskLevel") if isinstance(review.get("riskLevel"), str) else ""
-    rationale = review.get("rationale") if isinstance(review.get("rationale"), str) else ""
+    rationale = (
+        review.get("rationale") if isinstance(review.get("rationale"), str) else ""
+    )
     return {
         "type": "auto_review",
         "review_id": str(params.get("reviewId") or "")[:128],
@@ -373,21 +503,34 @@ class AppServerSession:
     """
 
     def __init__(
-        self, writer: TextIO, *, lock: Any, thread_params: dict[str, Any],
-        turn_params: dict[str, Any], on_event: Callable[[dict[str, Any]], None],
+        self,
+        writer: TextIO,
+        *,
+        lock: Any,
+        thread_params: dict[str, Any],
+        turn_params: dict[str, Any],
+        on_event: Callable[[dict[str, Any]], None],
         on_approvals: Callable[[list[dict[str, Any]]], None],
-        on_final: Callable[[str], None], is_active: Callable[[], bool],
-        redact: Callable[[str], str], owns_connection: bool = True,
+        on_final: Callable[[str], None],
+        is_active: Callable[[], bool],
+        redact: Callable[[str], str],
+        owns_connection: bool = True,
     ) -> None:
         """Bind a live transport to one worker exchange and its persistence callbacks."""
         attached_thread = thread_params.get("threadId")
-        if not owns_connection and (not isinstance(attached_thread, str) or not attached_thread):
-            raise ValueError("A session on a shared connection needs the thread id of a loaded thread.")
+        if not owns_connection and (
+            not isinstance(attached_thread, str) or not attached_thread
+        ):
+            raise ValueError(
+                "A session on a shared connection needs the thread id of a loaded thread."
+            )
         self.writer = writer
         self.owns_connection = owns_connection
         # The prefix of every request ID that this session sends. On a shared connection a reply has no thread id,
         # so the ID alone says which session sent the request.
-        self.request_prefix = "worker" if owns_connection else f"worker-{uuid.uuid4().hex}"
+        self.request_prefix = (
+            "worker" if owns_connection else f"worker-{uuid.uuid4().hex}"
+        )
         self.lock = lock
         self.thread_params = copy.deepcopy(thread_params)
         self.turn_params = copy.deepcopy(turn_params)
@@ -434,7 +577,9 @@ class AppServerSession:
         The check is by prefix only: it does not say whether the request still waits. _reply ignores an ID it does
         not know.
         """
-        return isinstance(request_id, str) and request_id.startswith(self.request_prefix + "-")
+        return isinstance(request_id, str) and request_id.startswith(
+            self.request_prefix + "-"
+        )
 
     @property
     def turn_running(self) -> bool:
@@ -462,9 +607,16 @@ class AppServerSession:
                 self.on_event({"type": "thread.started", "thread_id": self.thread_id})
                 self._start_turn({**self.turn_params, "threadId": self.thread_id})
                 return
-            self._request("initialize", {"clientInfo": {
-                "name": "home_assistant_worker", "title": "Home Assistant", "version": "1",
-            }})
+            self._request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "home_assistant_worker",
+                        "title": "Home Assistant",
+                        "version": "1",
+                    }
+                },
+            )
 
     def _start_turn(self, params: dict[str, Any]) -> None:
         """Send turn/start and remember that a turn can now run."""
@@ -479,7 +631,9 @@ class AppServerSession:
                 if self.finished.is_set():
                     break
             if not self.finished.is_set():
-                self.fail("Codex closed the permission connection before the exchange finished.")
+                self.fail(
+                    "Codex closed the permission connection before the exchange finished."
+                )
         except Exception as exc:
             self.fail(f"Codex permission connection failed: {exc}")
 
@@ -504,9 +658,16 @@ class AppServerSession:
             self._closed = True
             if self.thread_id and self.turn_id and not self._turn_ended:
                 try:
-                    self._write({"id": f"{self.request_prefix}-stop", "method": "turn/interrupt", "params": {
-                        "threadId": self.thread_id, "turnId": self.turn_id,
-                    }})
+                    self._write(
+                        {
+                            "id": f"{self.request_prefix}-stop",
+                            "method": "turn/interrupt",
+                            "params": {
+                                "threadId": self.thread_id,
+                                "turnId": self.turn_id,
+                            },
+                        }
+                    )
                 except (OSError, ValueError):
                     pass
             self._pending.clear()
@@ -532,44 +693,77 @@ class AppServerSession:
         text = self.redact(raw)
         return text[:DISPLAY_LIMIT], text != raw or len(text) > DISPLAY_LIMIT
 
-    def _publish_approval(self, request_id: Any, method: str, params: dict[str, Any]) -> None:
+    def _publish_approval(
+        self, request_id: Any, method: str, params: dict[str, Any]
+    ) -> None:
         """Expose only a request for the active thread and turn, with an opaque UI ID."""
         # Before the turn starts, turn_id is empty and a request without a turnId would match it.
-        if not self.turn_id or params.get("threadId") != self.thread_id or params.get("turnId") != self.turn_id:
-            raise ValueError("permission request does not belong to the active exchange")
+        if (
+            not self.turn_id
+            or params.get("threadId") != self.thread_id
+            or params.get("turnId") != self.turn_id
+        ):
+            raise ValueError(
+                "permission request does not belong to the active exchange"
+            )
         # A repeated request id is an error even when the request limit is reached.
         if request_id in self._pending.values():
             raise ValueError("duplicate live permission request")
-        kind = {COMMAND_APPROVAL: "command", FILE_APPROVAL: "file_change", TOOL_APPROVAL: "tool"}[method]
+        kind = {
+            COMMAND_APPROVAL: "command",
+            FILE_APPROVAL: "file_change",
+            TOOL_APPROVAL: "tool",
+        }[method]
         if len(self._records) >= REQUEST_LIMIT:
             self._write({"id": request_id, "result": decision_result(kind, False)})
-            self.on_event({"type": "error", "message": "Too many permission requests in this exchange; request denied."})
+            self.on_event(
+                {
+                    "type": "error",
+                    "message": "Too many permission requests in this exchange; request denied.",
+                }
+            )
             return
         reason, _ = self._display(params.get("reason"))
         clipped = False
         # Anything but a new command, such as input typed into a running one, is shown but never allowed.
-        request_kind = params.get("kind", "command") if method == COMMAND_APPROVAL else ""
+        request_kind = (
+            params.get("kind", "command") if method == COMMAND_APPROVAL else ""
+        )
         # The counter's kind: a new command, input to a running one, a file change, or another request (a tool's too).
         prompt_kind = "file_change" if kind == "file_change" else "other"
         if kind == "command":
-            prompt_kind = {"command": "command", "writeStdin": "command_input"}.get(request_kind, "other")
+            prompt_kind = {"command": "command", "writeStdin": "command_input"}.get(
+                request_kind, "other"
+            )
         record: dict[str, Any] = {
-            "approval_id": uuid.uuid4().hex, "status": "pending", "reason": reason, "kind": kind,
-            "prompt_kind": prompt_kind, "can_allow": True, "command": "", "cwd": "", "changes": [],
+            "approval_id": uuid.uuid4().hex,
+            "status": "pending",
+            "reason": reason,
+            "kind": kind,
+            "prompt_kind": prompt_kind,
+            "can_allow": True,
+            "command": "",
+            "cwd": "",
+            "changes": [],
         }
         if kind == "tool":
             # Shown in full or not allowed: the arguments Codex will send, as JSON, after credentials are hidden.
             server, tool = self._tool_card(params)
             if server == CODEX_APPS_SERVER:
-                tool, record["app"] = self._app_names(tool, params["_meta"].get("connector_name"))
+                tool, record["app"] = self._app_names(
+                    tool, params["_meta"].get("connector_name")
+                )
                 # Codex's own sentence, not model text; still redacted and clipped like the arguments.
                 record["question"], clipped = self._display(params.get("message"))
             record["tool"] = f"{server}.{tool}"
             arguments = params["_meta"].get("tool_params")
             record["arguments"], arguments_clipped = self._display(
-                json.dumps(arguments, indent=2, sort_keys=True, ensure_ascii=False))
+                json.dumps(arguments, indent=2, sort_keys=True, ensure_ascii=False)
+            )
             clipped |= arguments_clipped
-            record["scope"] = "Allow this one tool call once. Codex asks again before the next one."
+            record["scope"] = (
+                "Allow this one tool call once. Codex asks again before the next one."
+            )
             record["can_allow"] = isinstance(arguments, dict)
         elif method == COMMAND_APPROVAL:
             record["command"], truncated = self._display(params.get("command"))
@@ -580,31 +774,55 @@ class AppServerSession:
                 "and files available to the app, including files outside /homeassistant."
             )
             if request_kind == "writeStdin":
-                record["scope"] = "Send this input to a command that is already running outside the configured sandbox."
-            record["can_allow"] = bool(record["command"] and record["cwd"]) and request_kind == "command"
+                record["scope"] = (
+                    "Send this input to a command that is already running outside the configured sandbox."
+                )
+            record["can_allow"] = (
+                bool(record["command"] and record["cwd"]) and request_kind == "command"
+            )
             network = params.get("networkApprovalContext")
             if isinstance(network, dict):
                 record["network"], _ = self._display(network.get("host"))
         else:
-            record["changes"] = copy.deepcopy(self._file_changes.get(str(params.get("itemId")), []))
-            record["scope"] = "Allow these file changes once, including any listed paths outside /homeassistant."
+            record["changes"] = copy.deepcopy(
+                self._file_changes.get(str(params.get("itemId")), [])
+            )
+            record["scope"] = (
+                "Allow these file changes once, including any listed paths outside /homeassistant."
+            )
             record["can_allow"] = bool(record["changes"]) and all(
-                change.get("path") and change.get("diff") and change.get("kind") in {"add", "update", "delete"}
-                for change in record["changes"])
-            clipped |= any(change.get("truncated") or change.get("redacted") for change in record["changes"])
+                change.get("path")
+                and change.get("diff")
+                and change.get("kind") in {"add", "update", "delete"}
+                for change in record["changes"]
+            )
+            clipped |= any(
+                change.get("truncated") or change.get("redacted")
+                for change in record["changes"]
+            )
         if clipped:
             record["can_allow"] = False
         if request_kind == "writeStdin":
-            record["note"] = "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
+            record["note"] = (
+                "Input to a running command cannot be allowed here. Deny it and ask for the whole action as one command."
+            )
         elif kind == "tool" and record["can_allow"]:
-            record["note"] = ("Known credentials are hidden. Allow once runs this call only; it does not change your "
-                              "permission mode or approve the next call.")
+            record["note"] = (
+                "Known credentials are hidden. Allow once runs this call only; it does not change your "
+                "permission mode or approve the next call."
+            )
         elif request_kind not in ("", "command"):
-            record["note"] = "This kind of request cannot be allowed here. Deny it and ask for a single command or file change."
+            record["note"] = (
+                "This kind of request cannot be allowed here. Deny it and ask for a single command or file change."
+            )
         elif not record["can_allow"]:
-            record["note"] = "The complete action is missing, too large, or redacted. Deny it and request an action without hidden details."
+            record["note"] = (
+                "The complete action is missing, too large, or redacted. Deny it and request an action without hidden details."
+            )
         else:
-            record["note"] = "Known credentials are hidden. This does not change your sandbox setting or approve future requests."
+            record["note"] = (
+                "Known credentials are hidden. This does not change your sandbox setting or approve future requests."
+            )
         record["confirmation"] = confirmation(record)
         self._records.append(record)
         self._pending[record["approval_id"]] = request_id
@@ -616,7 +834,9 @@ class AppServerSession:
     def _app_names(self, tool: str, connector_name: Any) -> tuple[str, str]:
         """The tool and app names that an app card and its log line show; a name that redaction changes is generic."""
         app = plain_title(connector_name)
-        return (tool if self.redact(tool) == tool else "tool"), (app if self.redact(app) == app else "")
+        return (tool if self.redact(tool) == tool else "tool"), (
+            app if self.redact(app) == app else ""
+        )
 
     def _tool_card(self, params: dict[str, Any]) -> tuple[str, str] | None:
         """Return (server, tool) when this tool question gets a page card in this chat, else None.
@@ -634,20 +854,34 @@ class AppServerSession:
         message = _elicitation_refusal(params)
         # Today only Read only declines an app tool question (see _tool_card); test both, so a later mode that
         # declines one does not show this Read only sentence.
-        if app_tool_request(params) and self.thread_params.get("sandbox") == "read-only":
-            message = ("A ChatGPT app asked to run one of its tools. A Read only chat changes nothing, so it was "
-                       "declined. Switch the chat to Default to approve app tools one call at a time.")
+        if (
+            app_tool_request(params)
+            and self.thread_params.get("sandbox") == "read-only"
+        ):
+            message = (
+                "A ChatGPT app asked to run one of its tools. A Read only chat changes nothing, so it was "
+                "declined. Switch the chat to Default to approve app tools one call at a time."
+            )
         self.on_event({"type": "error", "message": message})
         name = params.get("serverName")
-        server = name if isinstance(name, str) and _SERVER_NAME.fullmatch(name) else "an unnamed server"
-        print(f"Declined a tool question from {server}: the page has no card for it.", flush=True)
+        server = (
+            name
+            if isinstance(name, str) and _SERVER_NAME.fullmatch(name)
+            else "an unnamed server"
+        )
+        print(
+            f"Declined a tool question from {server}: the page has no card for it.",
+            flush=True,
+        )
 
     def waiting_for_user(self) -> bool:
         """Return True while a permission request waits for the user, when silence from Codex is expected."""
         with self.lock:
             return bool(self._pending) and not self._closed
 
-    def decide(self, approval_id: str, decision: str, decided_by: dict[str, str] | None = None) -> None:
+    def decide(
+        self, approval_id: str, decision: str, decided_by: dict[str, str] | None = None
+    ) -> None:
         """Apply exactly one allow/deny response to a still-live request.
 
         Persistence precedes the write to Codex. If either fails, the connection
@@ -658,7 +892,9 @@ class AppServerSession:
         with self.lock:
             if self._closed or not self.is_active() or approval_id not in self._pending:
                 raise LookupError(APPROVAL_GONE)
-            record = next(item for item in self._records if item["approval_id"] == approval_id)
+            record = next(
+                item for item in self._records if item["approval_id"] == approval_id
+            )
             if decision == "allow" and not record["can_allow"]:
                 # The note already says why this request can only be denied.
                 raise ValueError(record["note"])
@@ -671,10 +907,17 @@ class AppServerSession:
                 record["decided_by"] = dict(decided_by)
             try:
                 self.on_approvals(copy.deepcopy(self._records))
-                self._write({"id": request_id, "result": decision_result(record["kind"], decision == "allow")})
+                self._write(
+                    {
+                        "id": request_id,
+                        "result": decision_result(record["kind"], decision == "allow"),
+                    }
+                )
             except (OSError, ValueError):
                 record["status"] = "expired"
-                self.fail("Could not deliver the permission decision. The exchange was stopped.")
+                self.fail(
+                    "Could not deliver the permission decision. The exchange was stopped."
+                )
                 raise OSError(self.error) from None
             finally:
                 if record["kind"] == "tool":
@@ -683,7 +926,10 @@ class AppServerSession:
                     outcome = record["status"] + " by the owner"
                     if record["status"] == "expired":
                         outcome = "expired: the owner's decision did not reach Codex"
-                    print(f"Tool call {_NOT_LOG_NAME.sub('_', record['tool'])} {outcome}.", flush=True)
+                    print(
+                        f"Tool call {_NOT_LOG_NAME.sub('_', record['tool'])} {outcome}.",
+                        flush=True,
+                    )
 
     def receive(self, message: dict[str, Any]) -> None:
         """Dispatch a server message without treating model prose as permission."""
@@ -704,8 +950,18 @@ class AppServerSession:
                     self._publish_approval(message["id"], method, params)
                 elif method == "item/permissions/requestApproval":
                     # Broad turn/session grants are deliberately unsupported.
-                    self._write({"id": message["id"], "result": {"permissions": {}, "scope": "turn"}})
-                    self.on_event({"type": "error", "message": "Broad permission grant denied. Request a single command or file change instead."})
+                    self._write(
+                        {
+                            "id": message["id"],
+                            "result": {"permissions": {}, "scope": "turn"},
+                        }
+                    )
+                    self.on_event(
+                        {
+                            "type": "error",
+                            "message": "Broad permission grant denied. Request a single command or file change instead.",
+                        }
+                    )
                 elif method == TOOL_APPROVAL and self._tool_card(params):
                     self._publish_approval(message["id"], method, params)
                 elif method == TOOL_APPROVAL:
@@ -713,7 +969,15 @@ class AppServerSession:
                     # instead of declining where nobody can see it.
                     self._decline_tool_question(message["id"], params)
                 else:
-                    self._write({"id": message["id"], "error": {"code": -32601, "message": "Unsupported worker request"}})
+                    self._write(
+                        {
+                            "id": message["id"],
+                            "error": {
+                                "code": -32601,
+                                "message": "Unsupported worker request",
+                            },
+                        }
+                    )
                 return
             if "id" in message:
                 self._reply(message)
@@ -721,10 +985,17 @@ class AppServerSession:
             if method == "serverRequest/resolved":
                 changed = False
                 for approval_id, request_id in list(self._pending.items()):
-                    if request_id == params.get("requestId") and params.get("threadId") == self.thread_id:
+                    if (
+                        request_id == params.get("requestId")
+                        and params.get("threadId") == self.thread_id
+                    ):
                         self._pending.pop(approval_id)
                         self._pending_files.pop(approval_id, None)
-                        next(item for item in self._records if item["approval_id"] == approval_id)["status"] = "expired"
+                        next(
+                            item
+                            for item in self._records
+                            if item["approval_id"] == approval_id
+                        )["status"] = "expired"
                         changed = True
                 if changed:
                     self.on_approvals(copy.deepcopy(self._records))
@@ -732,28 +1003,59 @@ class AppServerSession:
                 if params.get("threadId") == self.thread_id:
                     self.turn_id = params["turn"]["id"]
                     self.on_event({"type": "turn.started"})
-            elif params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id and method in {"item/started", "item/completed"}:
+            elif (
+                params.get("threadId") == self.thread_id
+                and params.get("turnId") == self.turn_id
+                and method in {"item/started", "item/completed"}
+            ):
                 self._item(method, params["item"])
-            elif (self.turn_id and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id
-                  and method == "item/reasoning/summaryTextDelta"):
+            elif (
+                self.turn_id
+                and params.get("threadId") == self.thread_id
+                and params.get("turnId") == self.turn_id
+                and method == "item/reasoning/summaryTextDelta"
+            ):
                 self._reasoning_delta(params)
-            elif method in AUTO_REVIEW_EVENTS and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
+            elif (
+                method in AUTO_REVIEW_EVENTS
+                and params.get("threadId") == self.thread_id
+                and params.get("turnId") == self.turn_id
+            ):
                 self.on_event(auto_review_event(method, params, self.redact))
-            elif (method == "turn/plan/updated" and self.turn_id
-                  and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id):
+            elif (
+                method == "turn/plan/updated"
+                and self.turn_id
+                and params.get("threadId") == self.thread_id
+                and params.get("turnId") == self.turn_id
+            ):
                 self._plan(params.get("plan"))
-            elif method == "item/fileChange/patchUpdated" and params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
-                self._cache_file_changes(str(params["itemId"]), params.get("changes") or [])
-            elif method == "turn/completed" and params.get("threadId") == self.thread_id:
+            elif (
+                method == "item/fileChange/patchUpdated"
+                and params.get("threadId") == self.thread_id
+                and params.get("turnId") == self.turn_id
+            ):
+                self._cache_file_changes(
+                    str(params["itemId"]), params.get("changes") or []
+                )
+            elif (
+                method == "turn/completed" and params.get("threadId") == self.thread_id
+            ):
                 turn = params["turn"]
                 if turn.get("id") != self.turn_id:
-                    raise ValueError("completion does not belong to the active exchange")
+                    raise ValueError(
+                        "completion does not belong to the active exchange"
+                    )
                 self._turn_ended = True
                 if turn.get("status") == "completed" and self._final_text:
                     self.on_final(self._final_text)
                     self.returncode = 0
                 else:
-                    self.error = self.redact(str((turn.get("error") or {}).get("message") or "Codex finished without a final answer."))
+                    self.error = self.redact(
+                        str(
+                            (turn.get("error") or {}).get("message")
+                            or "Codex finished without a final answer."
+                        )
+                    )
                 self.close()
 
     def _track_closed_turn(self, message: Any) -> None:
@@ -778,13 +1080,24 @@ class AppServerSession:
             self.turn_id = turn["id"]
             if not self._turn_ended:
                 try:
-                    self._write({"id": f"{self.request_prefix}-stop", "method": "turn/interrupt", "params": {
-                        "threadId": self.thread_id, "turnId": self.turn_id,
-                    }})
+                    self._write(
+                        {
+                            "id": f"{self.request_prefix}-stop",
+                            "method": "turn/interrupt",
+                            "params": {
+                                "threadId": self.thread_id,
+                                "turnId": self.turn_id,
+                            },
+                        }
+                    )
                 except (OSError, ValueError):
                     pass
-        elif (message.get("method") == "turn/completed" and self.turn_id
-              and params.get("threadId") == self.thread_id and (params.get("turn") or {}).get("id") == self.turn_id):
+        elif (
+            message.get("method") == "turn/completed"
+            and self.turn_id
+            and params.get("threadId") == self.thread_id
+            and (params.get("turn") or {}).get("id") == self.turn_id
+        ):
             self._turn_ended = True
 
     def _reply(self, message: dict[str, Any]) -> None:
@@ -796,11 +1109,18 @@ class AppServerSession:
             if method == "turn/start":
                 # Codex refused the turn, so no turn runs.
                 self._turn_requested = False
-            raise ValueError(f"{method}: {message['error'].get('message', 'request failed')}")
+            raise ValueError(
+                f"{method}: {message['error'].get('message', 'request failed')}"
+            )
         result = message.get("result") or {}
         if method == "initialize":
             self._write({"method": "initialized"})
-            self._request("thread/resume" if self.thread_params.get("threadId") else "thread/start", self.thread_params)
+            self._request(
+                "thread/resume"
+                if self.thread_params.get("threadId")
+                else "thread/start",
+                self.thread_params,
+            )
         elif method in {"thread/start", "thread/resume"}:
             self.thread_id = result["thread"]["id"]
             expected = self.thread_params.get("threadId")
@@ -811,25 +1131,40 @@ class AppServerSession:
         elif method == "turn/start":
             self.turn_id = result["turn"]["id"]
 
-    def _cache_file_changes(self, item_id: str, raw_changes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _cache_file_changes(
+        self, item_id: str, raw_changes: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """Bound and redact complete file actions, refusing to replace a pending review."""
         changes = []
         remaining = DISPLAY_LIMIT
         for change in raw_changes[:REQUEST_LIMIT]:
             kind = change.get("kind") or {}
-            entry: dict[str, Any] = {"kind": str(kind.get("type") or "unknown"), "truncated": False, "redacted": False}
-            for key, raw in (("path", change.get("path")), ("move_path", kind.get("move_path")), ("diff", change.get("diff"))):
+            entry: dict[str, Any] = {
+                "kind": str(kind.get("type") or "unknown"),
+                "truncated": False,
+                "redacted": False,
+            }
+            for key, raw in (
+                ("path", change.get("path")),
+                ("move_path", kind.get("move_path")),
+                ("diff", change.get("diff")),
+            ):
                 raw = str(raw or "")
                 text = self.redact(raw)
                 entry["redacted"] |= text != raw
                 entry["truncated"] |= len(text) > max(remaining, 0)
-                entry[key] = text[:max(remaining, 0)]
+                entry[key] = text[: max(remaining, 0)]
                 remaining -= len(text)
             changes.append(entry)
         if len(raw_changes) > REQUEST_LIMIT and changes:
             changes[-1]["truncated"] = True
-        if item_id in self._pending_files.values() and self._file_changes.get(item_id) != changes:
-            raise ValueError("File changes were updated while permission was pending. The exchange was stopped.")
+        if (
+            item_id in self._pending_files.values()
+            and self._file_changes.get(item_id) != changes
+        ):
+            raise ValueError(
+                "File changes were updated while permission was pending. The exchange was stopped."
+            )
         self._file_changes[item_id] = changes
         return changes
 
@@ -843,10 +1178,22 @@ class AppServerSession:
         if not isinstance(plan, list) or len(plan) > PLAN_STEP_LIMIT:
             return
         for entry in plan:
-            if not isinstance(entry, dict) or not isinstance(entry.get("step"), str) or not isinstance(entry.get("status"), str):
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("step"), str)
+                or not isinstance(entry.get("status"), str)
+            ):
                 return
-        items = [{"text": entry["step"], "completed": entry["status"] == "completed"} for entry in plan]
-        self.on_event({"type": "item.updated", "item": {"id": "app-server:plan", "type": "todo_list", "items": items}})
+        items = [
+            {"text": entry["step"], "completed": entry["status"] == "completed"}
+            for entry in plan
+        ]
+        self.on_event(
+            {
+                "type": "item.updated",
+                "item": {"id": "app-server:plan", "type": "todo_list", "items": items},
+            }
+        )
 
     def _spawned(self, method: str, item: dict[str, Any]) -> bool:
         """Return True for the completed spawn item of this thread, the only collab item whose ids Codex made.
@@ -854,14 +1201,26 @@ class AppServerSession:
         In the other collab tools (send_input, wait, resume_agent, close_agent and the rest) the model writes the
         receiver, so those ids may name the thread of another chat.
         """
-        return (method == "item/completed" and item.get("tool") == "spawnAgent"
-                and item.get("senderThreadId") == self.thread_id)
+        return (
+            method == "item/completed"
+            and item.get("tool") == "spawnAgent"
+            and item.get("senderThreadId") == self.thread_id
+        )
 
     def _reasoning_delta(self, params: dict[str, Any]) -> None:
         """Update a live summary part without exposing the separate reasoning content."""
-        item_id, index, delta = params.get("itemId"), params.get("summaryIndex"), params.get("delta")
-        if (not isinstance(item_id, str) or item_id not in self._reasoning_summaries
-                or type(index) is not int or not 0 <= index < REQUEST_LIMIT or not isinstance(delta, str)):
+        item_id, index, delta = (
+            params.get("itemId"),
+            params.get("summaryIndex"),
+            params.get("delta"),
+        )
+        if (
+            not isinstance(item_id, str)
+            or item_id not in self._reasoning_summaries
+            or type(index) is not int
+            or not 0 <= index < REQUEST_LIMIT
+            or not isinstance(delta, str)
+        ):
             return
         parts = self._reasoning_summaries[item_id]
         while len(parts) <= index:
@@ -870,9 +1229,17 @@ class AppServerSession:
         if not delta or not remaining:
             return
         parts[index] += delta[:remaining]
-        self.on_event({"type": "item.updated", "item": {
-            "id": item_id, "type": "reasoning", "status": "in_progress", "text": "\n".join(parts),
-        }})
+        self.on_event(
+            {
+                "type": "item.updated",
+                "item": {
+                    "id": item_id,
+                    "type": "reasoning",
+                    "status": "in_progress",
+                    "text": "\n".join(parts),
+                },
+            }
+        )
 
     def _item(self, method: str, item: dict[str, Any]) -> None:
         """Translate app-server items into the worker's existing activity format."""
@@ -880,12 +1247,27 @@ class AppServerSession:
         if kind == "collabAgentToolCall":
             if self._spawned(method, item):
                 # The ids of the sub-agents that this thread started. Their tool calls name their own thread.
-                threads = [value for value in item.get("receiverThreadIds") or [] if isinstance(value, str)]
+                threads = [
+                    value
+                    for value in item.get("receiverThreadIds") or []
+                    if isinstance(value, str)
+                ]
                 if threads:
-                    self.on_event({"type": "agent.threads", "parent": self.thread_id, "threads": threads})
+                    self.on_event(
+                        {
+                            "type": "agent.threads",
+                            "parent": self.thread_id,
+                            "threads": threads,
+                        }
+                    )
             return
-        mapped = {"agentMessage": "agent_message", "commandExecution": "command_execution",
-                  "fileChange": "file_change", "mcpToolCall": "mcp_tool_call", "webSearch": "web_search"}
+        mapped = {
+            "agentMessage": "agent_message",
+            "commandExecution": "command_execution",
+            "fileChange": "file_change",
+            "mcpToolCall": "mcp_tool_call",
+            "webSearch": "web_search",
+        }
         if kind not in mapped and kind != "reasoning":
             # Images are collected from the rollout after completion. Do not
             # duplicate image bytes or user input in the activity log.
@@ -894,18 +1276,33 @@ class AppServerSession:
         if item.get("status") == "inProgress":
             event_item["status"] = "in_progress"
         if kind == "commandExecution":
-            event_item.update(aggregated_output=item.get("aggregatedOutput"), exit_code=item.get("exitCode"))
+            event_item.update(
+                aggregated_output=item.get("aggregatedOutput"),
+                exit_code=item.get("exitCode"),
+            )
         elif kind == "fileChange":
-            changes = self._cache_file_changes(str(item["id"]), item.get("changes") or [])
+            changes = self._cache_file_changes(
+                str(item["id"]), item.get("changes") or []
+            )
             if method == "item/completed":
                 self._file_changes.pop(str(item["id"]), None)
-            event_item["changes"] = [{"path": c["path"], "kind": c["kind"], "move_path": c["move_path"]} for c in changes]
+            event_item["changes"] = [
+                {"path": c["path"], "kind": c["kind"], "move_path": c["move_path"]}
+                for c in changes
+            ]
         elif kind == "reasoning":
-            if method == "item/started" and len(self._reasoning_summaries) < REQUEST_LIMIT:
+            if (
+                method == "item/started"
+                and len(self._reasoning_summaries) < REQUEST_LIMIT
+            ):
                 self._reasoning_summaries[str(item["id"])] = []
             elif method == "item/completed":
                 self._reasoning_summaries.pop(str(item["id"]), None)
-            event_item = {"id": item["id"], "type": "reasoning", "text": "\n".join(item.get("summary") or [])}
+            event_item = {
+                "id": item["id"],
+                "type": "reasoning",
+                "text": "\n".join(item.get("summary") or []),
+            }
         elif kind == "agentMessage" and method == "item/completed":
             if item.get("phase") != "commentary":
                 self._final_text = str(item.get("text") or "")

@@ -30,18 +30,17 @@ before.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
 import os
+from pathlib import Path
 import shutil
 import sys
 import time
-from dataclasses import dataclass
-from pathlib import Path
-
-import requests
 
 from app_paths import CONFIG_ROOT
+import requests
 
 BUNDLED_DIR = Path("/usr/share/ha_codex/integration/codex_cli")
 TARGET_DIR = CONFIG_ROOT / "custom_components" / "codex_cli"
@@ -130,7 +129,9 @@ def read_marker(folder: Path) -> dict | None:
 def write_bundle(bundled: Path, staging: Path, marker: dict) -> None:
     """Copy the bundle to the staging folder and add the marker file."""
     shutil.copytree(bundled, staging, ignore=shutil.ignore_patterns("__pycache__"))
-    (staging / MARKER_NAME).write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+    (staging / MARKER_NAME).write_text(
+        json.dumps(marker, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def back_up(target: Path, backup: Path) -> None:
@@ -177,7 +178,10 @@ def is_outside_config(target: Path) -> bool:
     components = target.parent
     config = components.parent
     # A link anywhere in the custom_components path resolves somewhere else, and is caught here.
-    return components.exists() and components.resolve() != config.resolve() / components.name
+    return (
+        components.exists()
+        and components.resolve() != config.resolve() / components.name
+    )
 
 
 def ownership(target: Path) -> str:
@@ -201,17 +205,26 @@ def ownership(target: Path) -> str:
     return "app"
 
 
-def sync(bundled: Path, target: Path, backup: Path, app_version: str, work: Path) -> SyncResult:
+def sync(
+    bundled: Path, target: Path, backup: Path, app_version: str, work: Path
+) -> SyncResult:
     """Bring the integration's folder in line with the bundle, unless it is another install's."""
     version = manifest_version(bundled)
     if not version:
-        return SyncResult("no_bundle", detail=f"no integration manifest under {bundled}")
+        return SyncResult(
+            "no_bundle", detail=f"no integration manifest under {bundled}"
+        )
     installed_version = manifest_version(target)
     try:
         # Every start empties the work folder first, so nothing an interrupted start left behind stays.
         clear_work_dir(work)
     except OSError as exc:
-        return SyncResult("failed", version, installed_version, detail=f"could not empty {work}: {exc}")
+        return SyncResult(
+            "failed",
+            version,
+            installed_version,
+            detail=f"could not empty {work}: {exc}",
+        )
 
     owner = ownership(target)
     if owner not in ("none", "app"):
@@ -226,7 +239,11 @@ def sync(bundled: Path, target: Path, backup: Path, app_version: str, work: Path
     try:
         work.mkdir(parents=True)
         target.parent.mkdir(parents=True, exist_ok=True)
-        write_bundle(bundled, staging, {"app_version": app_version, "version": version, "digest": digest})
+        write_bundle(
+            bundled,
+            staging,
+            {"app_version": app_version, "version": version, "digest": digest},
+        )
         if action == "updated":
             back_up(target, backup)
         swap_in(staging, target, old)
@@ -237,7 +254,12 @@ def sync(bundled: Path, target: Path, backup: Path, app_version: str, work: Path
         clear_work_dir(work)
     except OSError as exc:
         # The new folder is in place; the old copy waits outside custom_components for the next start.
-        return SyncResult(action, version, installed_version, detail=f"the old copy was not removed: {exc}")
+        return SyncResult(
+            action,
+            version,
+            installed_version,
+            detail=f"the old copy was not removed: {exc}",
+        )
     return SyncResult(action, version, installed_version)
 
 
@@ -352,12 +374,16 @@ def announce(token: str, sleep=time.sleep) -> None:
         if known is None:
             failed_reads += 1
             if failed_reads >= ANNOUNCE_UNREAD_LIMIT:
-                log("could not ask Home Assistant whether the integration is loaded; announcing the app anyway")
+                log(
+                    "could not ask Home Assistant whether the integration is loaded; announcing the app anyway"
+                )
                 break
         else:
             failed_reads = 0
             if not waiting_logged:
-                log("discovery waits until Home Assistant has loaded the integration (after its next restart)")
+                log(
+                    "discovery waits until Home Assistant has loaded the integration (after its next restart)"
+                )
                 waiting_logged = True
         sleep(ANNOUNCE_POLL_SECONDS)
     supervisor_post("/discovery", {"service": DISCOVERY_SERVICE, "config": {}}, token)
@@ -368,7 +394,9 @@ def show_notice(notice: tuple[str, str, str], token: str) -> bool:
     notification_id, title, message = notice
     payload = {"notification_id": notification_id, "title": title, "message": message}
     for attempt in range(NOTICE_ATTEMPTS):
-        if supervisor_post("/core/api/services/persistent_notification/create", payload, token):
+        if supervisor_post(
+            "/core/api/services/persistent_notification/create", payload, token
+        ):
             return True
         if attempt + 1 < NOTICE_ATTEMPTS:
             time.sleep(NOTICE_RETRY_SECONDS)
@@ -378,7 +406,9 @@ def show_notice(notice: tuple[str, str, str], token: str) -> bool:
 def dismiss_notice(notification_id: str, token: str) -> bool:
     """Remove a persistent notification from Home Assistant; return whether the request was accepted."""
     payload = {"notification_id": notification_id}
-    return supervisor_post("/core/api/services/persistent_notification/dismiss", payload, token)
+    return supervisor_post(
+        "/core/api/services/persistent_notification/dismiss", payload, token
+    )
 
 
 def read_state(state_path: Path) -> dict:
@@ -402,7 +432,9 @@ def write_state(state_path: Path, state: dict) -> None:
         log(f"could not save {state_path}: {exc}")
 
 
-def notice_due(result: SyncResult, app_version: str, state: dict) -> tuple[str, str, str] | None:
+def notice_due(
+    result: SyncResult, app_version: str, state: dict
+) -> tuple[str, str, str] | None:
     """Return the notice this start should show, given what earlier starts already showed.
 
     A restart notice stays due at later starts until Home Assistant accepts it once, so the owner always
@@ -427,10 +459,15 @@ def notice_due(result: SyncResult, app_version: str, state: dict) -> tuple[str, 
 
 def kept_notice_outdated(result: SyncResult, state: dict) -> bool:
     """Return whether the 'left as installed' notice was shown but the folder is the app's again."""
-    return result.action in ("current", "installed", "updated") and "kept_notice_version" in state
+    return (
+        result.action in ("current", "installed", "updated")
+        and "kept_notice_version" in state
+    )
 
 
-def record_notice(result: SyncResult, app_version: str, state: dict, notice, shown: bool) -> dict:
+def record_notice(
+    result: SyncResult, app_version: str, state: dict, notice, shown: bool
+) -> dict:
     """Return the notice record after this start: what was shown, and which restart notice is still owed."""
     state = dict(state)
     if result.action == "foreign" and shown:
@@ -449,7 +486,9 @@ def install_option_on(options_path: Path) -> bool:
         options = json.loads(options_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return True
-    return not (isinstance(options, dict) and options.get("install_integration") is False)
+    return not (
+        isinstance(options, dict) and options.get("install_integration") is False
+    )
 
 
 def log(message: str) -> None:
@@ -483,7 +522,11 @@ def main(argv: list[str] | None = None) -> int:
     notice = notice_due(result, app_version, state)
     shown = bool(notice and token and show_notice(notice, token))
     new_state = record_notice(result, app_version, state, notice, shown)
-    if kept_notice_outdated(result, new_state) and token and dismiss_notice(NOTICE_KEPT, token):
+    if (
+        kept_notice_outdated(result, new_state)
+        and token
+        and dismiss_notice(NOTICE_KEPT, token)
+    ):
         del new_state["kept_notice_version"]
     if new_state != state:
         write_state(NOTICE_STATE_PATH, new_state)

@@ -7,13 +7,13 @@ and no network: the proofs that the pinned Codex behaves as the fake does are in
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import queue
 import sys
+from tempfile import TemporaryDirectory
 import threading
 import time
 import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -31,7 +31,9 @@ class Pipe:
         self.lines: queue.Queue[str] = queue.Queue()
 
     def put(self, message: dict | str) -> None:
-        self.lines.put(message if isinstance(message, str) else json.dumps(message) + "\n")
+        self.lines.put(
+            message if isinstance(message, str) else json.dumps(message) + "\n"
+        )
 
     def close(self) -> None:
         self.lines.put("")
@@ -71,8 +73,12 @@ class FakeCodex:
         self.no_closed = False
         self.tool_status = "ready"
         self.notice_thread = False  # Put the thread id on each tool notice.
-        self.after_thread: list[dict] = []  # Lines sent after the tool notices of each thread/start or resume.
-        self.crash_after_thread = False  # End the output right after the reply to thread/start or resume.
+        self.after_thread: list[
+            dict
+        ] = []  # Lines sent after the tool notices of each thread/start or resume.
+        self.crash_after_thread = (
+            False  # End the output right after the reply to thread/start or resume.
+        )
         self.loaded: set[str] = set()  # Threads that hold their tool programs now.
         self.resume_as = ""  # When set, thread/resume loads and names this thread instead of the one asked for.
         self.threads = 0
@@ -80,7 +86,11 @@ class FakeCodex:
 
     def handle(self, message: dict) -> None:
         self.sent.append(message)
-        method, params, request_id = message.get("method"), message.get("params") or {}, message.get("id")
+        method, params, request_id = (
+            message.get("method"),
+            message.get("params") or {},
+            message.get("id"),
+        )
         if request_id is None or method in self.silent:
             return
         if method in ("thread/start", "thread/resume"):
@@ -96,18 +106,35 @@ class FakeCodex:
                 return
             where = {"threadId": thread_id} if self.notice_thread else {}
             for name in TOOLS:
-                self.stdout.put({"method": "mcpServer/startupStatus/updated",
-                                 "params": {"name": name, "status": "starting", **where}})
+                self.stdout.put(
+                    {
+                        "method": "mcpServer/startupStatus/updated",
+                        "params": {"name": name, "status": "starting", **where},
+                    }
+                )
                 if self.tool_status != "starting":
-                    self.stdout.put({"method": "mcpServer/startupStatus/updated",
-                                     "params": {"name": name, "status": self.tool_status, **where}})
+                    self.stdout.put(
+                        {
+                            "method": "mcpServer/startupStatus/updated",
+                            "params": {
+                                "name": name,
+                                "status": self.tool_status,
+                                **where,
+                            },
+                        }
+                    )
             for line in self.after_thread:
                 self.stdout.put(line)
         elif method == "thread/unsubscribe":
             self.loaded.discard(params["threadId"])
             self.stdout.put({"id": request_id, "result": {}})
             if not self.no_closed:
-                self.stdout.put({"method": "thread/closed", "params": {"threadId": params["threadId"]}})
+                self.stdout.put(
+                    {
+                        "method": "thread/closed",
+                        "params": {"threadId": params["threadId"]},
+                    }
+                )
         elif method == "initialize" or str(request_id).startswith("host-"):
             self.stdout.put({"id": request_id, "result": {}})
 
@@ -138,7 +165,9 @@ class FakeSession:
 
     def receive(self, message: dict) -> None:
         if self.raise_on and message.get("method") == self.raise_on:
-            raise ValueError("permission request does not belong to the active exchange")
+            raise ValueError(
+                "permission request does not belong to the active exchange"
+            )
         self.received.append(message)
 
     def fail(self, message: str) -> None:
@@ -211,9 +240,13 @@ class HostTest(unittest.TestCase):
         self.processes: list[FakeCodex] = []
         self.spawned_args: list[list[str]] = []
         self.logs: list[str] = []
-        self.rows = {"env": {"HA_URL": "http://supervisor/core", "HA_TOKEN": "token-value-1"},
-                     "args": ["app-server"], "sign_in": [10, 20], "versions": ["0.5.0", "0.166.0"],
-                     "rules": "hash-of-rule-files"}
+        self.rows = {
+            "env": {"HA_URL": "http://supervisor/core", "HA_TOKEN": "token-value-1"},
+            "args": ["app-server"],
+            "sign_in": [10, 20],
+            "versions": ["0.5.0", "0.166.0"],
+            "rules": "hash-of-rule-files",
+        }
         self.on = True
         self.clock = Clock()
         self.on_spawn = lambda process: None
@@ -235,19 +268,34 @@ class HostTest(unittest.TestCase):
             process.crash()
 
         options = {
-            "spawn": spawn, "reap": reap, "args": lambda: ["app-server"], "env": dict,
-            "fingerprint_rows": lambda: json.loads(json.dumps(self.rows)), "enabled": lambda: self.on,
-            "session_file": lambda thread_id: Path(self.tmp.name) / f"{thread_id}.jsonl",
-            "redact": lambda text: text.replace("token-value-1", "[hidden]"), "log": self.logs.append,
-            "lock": threading.RLock(), "live_max": self.live_max, "clock": self.clock, "reply_timeout": 1.0,
-            "ready_timeout": 1.0}
+            "spawn": spawn,
+            "reap": reap,
+            "args": lambda: ["app-server"],
+            "env": dict,
+            "fingerprint_rows": lambda: json.loads(json.dumps(self.rows)),
+            "enabled": lambda: self.on,
+            "session_file": lambda thread_id: (
+                Path(self.tmp.name) / f"{thread_id}.jsonl"
+            ),
+            "redact": lambda text: text.replace("token-value-1", "[hidden]"),
+            "log": self.logs.append,
+            "lock": threading.RLock(),
+            "live_max": self.live_max,
+            "clock": self.clock,
+            "reply_timeout": 1.0,
+            "ready_timeout": 1.0,
+        }
         options.update(overrides)
         host = CodexHost(**options)
         self.addCleanup(host.close)
         return host
 
     def assert_no_host_threads(self) -> None:
-        names = [thread.name for thread in threading.enumerate() if thread.name.startswith("codex-host-")]
+        names = [
+            thread.name
+            for thread in threading.enumerate()
+            if thread.name.startswith("codex-host-")
+        ]
         self.assertEqual(names, [])
 
     @property
@@ -273,8 +321,12 @@ class ProcessTests(HostTest):
         self.start()
         self.start()
         self.assertEqual(len(self.processes), 1)
-        self.assertEqual(self.spawned_args[0][-2:], ["--config", "thread_unload_delay_secs=0"])
-        self.assertEqual([m["method"] for m in self.codex.sent[:2]], ["initialize", "initialized"])
+        self.assertEqual(
+            self.spawned_args[0][-2:], ["--config", "thread_unload_delay_secs=0"]
+        )
+        self.assertEqual(
+            [m["method"] for m in self.codex.sent[:2]], ["initialize", "initialized"]
+        )
 
     def test_no_process_starts_after_close(self) -> None:
         self.start()
@@ -304,20 +356,35 @@ class ProcessTests(HostTest):
         self.assertTrue(self.processes[0].reaped)
         self.assertEqual(len(self.processes), 1)
 
-    def test_each_fingerprint_row_restarts_the_process_and_only_its_name_is_logged(self) -> None:
+    def test_each_fingerprint_row_restarts_the_process_and_only_its_name_is_logged(
+        self,
+    ) -> None:
         self.start()
-        changes = {"env": {"HA_URL": "http://192.0.2.7:8123", "HA_TOKEN": "token-value-1"},
-                   "args": ["app-server", "--config", "model=other"], "sign_in": [11, 21],
-                   "versions": ["0.5.1", "0.166.0"], "rules": "edited-agents-md"}
+        changes = {
+            "env": {"HA_URL": "http://192.0.2.7:8123", "HA_TOKEN": "token-value-1"},
+            "args": ["app-server", "--config", "model=other"],
+            "sign_in": [11, 21],
+            "versions": ["0.5.1", "0.166.0"],
+            "rules": "edited-agents-md",
+        }
         for number, (name, value) in enumerate(changes.items(), start=2):
             with self.subTest(row=name):
                 self.rows[name] = value
                 self.assertTrue(self.host.ready_for_message())
                 self.assertEqual(len(self.processes), number)
                 self.assertTrue(self.processes[number - 2].reaped)
-                self.assertTrue(any(line.endswith(f"changed: {name}.") for line in self.logs), self.logs)
+                self.assertTrue(
+                    any(line.endswith(f"changed: {name}.") for line in self.logs),
+                    self.logs,
+                )
         text = "\n".join(self.logs)
-        for value in ("192.0.2.7", "token-value-1", "model=other", "edited-agents-md", "0.5.1"):
+        for value in (
+            "192.0.2.7",
+            "token-value-1",
+            "model=other",
+            "edited-agents-md",
+            "0.5.1",
+        ):
             self.assertNotIn(value, text)
 
     def test_an_unchanged_fingerprint_keeps_the_process(self) -> None:
@@ -330,7 +397,9 @@ class ProcessTests(HostTest):
         self.start()
         session = self.begin("chat-a")
         self.rows["rules"] = "edited-agents-md"
-        self.assertFalse(self.host.ready_for_message())  # The new message waits in the queue.
+        self.assertFalse(
+            self.host.ready_for_message()
+        )  # The new message waits in the queue.
         self.assertTrue(self.host.restart_due)
         self.assertEqual(len(self.processes), 1)
         self.assertEqual(session.failed, "")
@@ -339,7 +408,9 @@ class ProcessTests(HostTest):
         self.assertFalse(self.host.restart_due)
         self.assertTrue(self.host.ready_for_message())
 
-    def test_after_a_restart_every_chat_is_paused_and_the_selected_one_wakes(self) -> None:
+    def test_after_a_restart_every_chat_is_paused_and_the_selected_one_wakes(
+        self,
+    ) -> None:
         self.start()
         self.assertTrue(self.host.select("chat-a", {"cwd": "/homeassistant"}, TOOLS))
         self.wake("chat-b")
@@ -348,13 +419,20 @@ class ProcessTests(HostTest):
         self.assertTrue(self.host.ready_for_message())
         self.assertEqual(len(self.processes), 2)
         self.assertEqual(self.host.live_chats(), ["chat-a"])
-        self.assertEqual([m["params"]["threadId"] for m in self.codex.methods("thread/resume")], [thread_a])
+        self.assertEqual(
+            [m["params"]["threadId"] for m in self.codex.methods("thread/resume")],
+            [thread_a],
+        )
 
-    def test_a_crash_fails_every_running_exchange_and_starts_a_new_process(self) -> None:
+    def test_a_crash_fails_every_running_exchange_and_starts_a_new_process(
+        self,
+    ) -> None:
         self.start()
         first, second = self.begin("chat-a"), self.begin("chat-b")
         self.codex.crash()
-        self.assertTrue(wait_until(lambda: len(self.processes) == 2 and self.host.running()))
+        self.assertTrue(
+            wait_until(lambda: len(self.processes) == 2 and self.host.running())
+        )
         self.assertTrue(first.failed and second.failed)
         self.assertEqual(self.host.live_chats(), [])
         self.assertTrue(self.processes[0].reaped)
@@ -363,7 +441,13 @@ class ProcessTests(HostTest):
         self.start()
         for number in (2, 3):
             self.codex.crash()
-            self.assertTrue(wait_until(lambda number=number: len(self.processes) == number and self.host.running()))
+            self.assertTrue(
+                wait_until(
+                    lambda number=number: (
+                        len(self.processes) == number and self.host.running()
+                    )
+                )
+            )
             self.clock.now += 60
         self.codex.crash()
         self.assertTrue(wait_until(lambda: not self.host.running()))
@@ -379,7 +463,13 @@ class ProcessTests(HostTest):
         self.start()
         for number in (2, 3, 4):
             self.codex.crash()
-            self.assertTrue(wait_until(lambda number=number: len(self.processes) == number and self.host.running()))
+            self.assertTrue(
+                wait_until(
+                    lambda number=number: (
+                        len(self.processes) == number and self.host.running()
+                    )
+                )
+            )
             self.clock.now += codex_host.CRASH_WINDOW
         self.assertTrue(self.host.ready_for_message())
 
@@ -396,7 +486,9 @@ class ProcessTests(HostTest):
         self.start()
         for number in range(60):
             self.codex.stderr.put(f"line {number} token-value-1\n")
-        self.assertTrue(wait_until(lambda: list(self.host.stderr_tail)[-1:] == ["line 59 [hidden]"]))
+        self.assertTrue(
+            wait_until(lambda: list(self.host.stderr_tail)[-1:] == ["line 59 [hidden]"])
+        )
         self.assertEqual(len(self.host.stderr_tail), 50)
         self.assertEqual(self.host.stderr_tail[0], "line 10 [hidden]")
 
@@ -420,10 +512,15 @@ class WakeAndPauseTests(HostTest):
         self.start()
         thread_id = self.wake("chat-a")
         self.host.pause("chat-a")
-        self.assertEqual(self.codex.methods("thread/unsubscribe")[-1]["params"], {"threadId": thread_id})
+        self.assertEqual(
+            self.codex.methods("thread/unsubscribe")[-1]["params"],
+            {"threadId": thread_id},
+        )
         self.assertEqual(self.host.live_chats(), [])
         self.assertEqual(self.wake("chat-a"), thread_id)
-        self.assertEqual(self.codex.methods("thread/resume")[-1]["params"]["threadId"], thread_id)
+        self.assertEqual(
+            self.codex.methods("thread/resume")[-1]["params"]["threadId"], thread_id
+        )
 
     def test_a_tool_program_that_fails_to_start_fails_the_wake(self) -> None:
         self.start()
@@ -567,7 +664,9 @@ class CapTests(HostTest):
         for cap in self.each_cap():
             for number in range(cap):
                 self.begin(f"chat-{number}")
-            self.assertFalse(self.host.select("chat-new", {"cwd": "/homeassistant"}, TOOLS))
+            self.assertFalse(
+                self.host.select("chat-new", {"cwd": "/homeassistant"}, TOOLS)
+            )
             self.assertNotIn("chat-new", self.host.live_chats())
             self.assertEqual(self.host.selected, "chat-new")
             self.assertEqual(len(self.host.live_chats()), cap)
@@ -585,34 +684,63 @@ class CapTests(HostTest):
             threads = [self.wake(f"chat-{number}") for number in range(cap)]
             for number, thread_id in enumerate(threads):
                 self.codex.emit(spawn_item(thread_id, f"child-{cap}-{number}"))
-            self.assertTrue(wait_until(lambda cap=cap: self.host.chat_for_thread(f"child-{cap}-{cap - 1}")))
+            self.assertTrue(
+                wait_until(
+                    lambda cap=cap: self.host.chat_for_thread(f"child-{cap}-{cap - 1}")
+                )
+            )
             self.assertEqual(len(self.host.live_chats()), cap)
 
 
 def spawn_item(parent: str, child: str) -> dict:
-    return {"method": "item/started", "params": {"threadId": parent, "turnId": "turn-1", "item": {
-        "type": "collabAgentToolCall", "id": "item-1", "senderThreadId": parent, "receiverThreadIds": [child]}}}
+    return {
+        "method": "item/started",
+        "params": {
+            "threadId": parent,
+            "turnId": "turn-1",
+            "item": {
+                "type": "collabAgentToolCall",
+                "id": "item-1",
+                "senderThreadId": parent,
+                "receiverThreadIds": [child],
+            },
+        },
+    }
 
 
 class ReaderTests(HostTest):
     def test_a_line_of_one_chat_never_reaches_the_session_of_another(self) -> None:
         self.start()
         first, second = self.begin("chat-a"), self.begin("chat-b")
-        thread_a, thread_b = self.host.chat("chat-a").thread_id, self.host.chat("chat-b").thread_id
+        thread_a, thread_b = (
+            self.host.chat("chat-a").thread_id,
+            self.host.chat("chat-b").thread_id,
+        )
         for number in range(20):
             thread_id = thread_a if number % 2 else thread_b
-            self.codex.emit({"method": "item/completed", "params": {"threadId": thread_id, "n": number}})
-        self.assertTrue(wait_until(lambda: len(first.received) + len(second.received) == 20))
+            self.codex.emit(
+                {
+                    "method": "item/completed",
+                    "params": {"threadId": thread_id, "n": number},
+                }
+            )
+        self.assertTrue(
+            wait_until(lambda: len(first.received) + len(second.received) == 20)
+        )
         self.assertEqual({m["params"]["threadId"] for m in first.received}, {thread_a})
         self.assertEqual({m["params"]["threadId"] for m in second.received}, {thread_b})
-        self.assertEqual([m["params"]["n"] for m in first.received], list(range(1, 20, 2)))
+        self.assertEqual(
+            [m["params"]["n"] for m in first.received], list(range(1, 20, 2))
+        )
 
     def test_a_reply_goes_to_the_session_that_sent_the_request(self) -> None:
         self.start()
         first, second = self.begin("chat-a"), self.begin("chat-b")
         self.codex.emit({"id": "worker-chat-b-1", "result": {"turn": {"id": "turn-b"}}})
         self.codex.emit({"id": "worker-chat-a-1", "result": {"turn": {"id": "turn-a"}}})
-        self.codex.emit({"id": "worker-gone-1", "result": {}})  # Nobody sent it: dropped.
+        self.codex.emit(
+            {"id": "worker-gone-1", "result": {}}
+        )  # Nobody sent it: dropped.
         self.assertTrue(wait_until(lambda: first.received and second.received))
         time.sleep(0.05)
         self.assertEqual([m["id"] for m in first.received], ["worker-chat-a-1"])
@@ -624,8 +752,20 @@ class ReaderTests(HostTest):
         for params in ({"threadId": thread_id}, {"threadId": "unknown-thread"}, {}):
             with self.subTest(params=params):
                 request_id = f"codex-{len(self.codex.sent)}"
-                self.codex.emit({"id": request_id, "method": "item/commandExecution/requestApproval", "params": params})
-                self.assertTrue(wait_until(lambda request_id=request_id: any(m.get("id") == request_id for m in self.codex.sent)))
+                self.codex.emit(
+                    {
+                        "id": request_id,
+                        "method": "item/commandExecution/requestApproval",
+                        "params": params,
+                    }
+                )
+                self.assertTrue(
+                    wait_until(
+                        lambda request_id=request_id: any(
+                            m.get("id") == request_id for m in self.codex.sent
+                        )
+                    )
+                )
                 answer = next(m for m in self.codex.sent if m.get("id") == request_id)
                 self.assertEqual(answer["error"], codex_host.UNSUPPORTED)
 
@@ -634,8 +774,18 @@ class ReaderTests(HostTest):
         session = self.begin("chat-a")
         self.host.detach("chat-a")
         thread_id = self.host.chat("chat-a").thread_id
-        self.codex.emit({"id": "codex-late", "method": "item/fileChange/requestApproval", "params": {"threadId": thread_id}})
-        self.assertTrue(wait_until(lambda: any(m.get("id") == "codex-late" for m in self.codex.sent)))
+        self.codex.emit(
+            {
+                "id": "codex-late",
+                "method": "item/fileChange/requestApproval",
+                "params": {"threadId": thread_id},
+            }
+        )
+        self.assertTrue(
+            wait_until(
+                lambda: any(m.get("id") == "codex-late" for m in self.codex.sent)
+            )
+        )
         self.assertEqual(session.received, [])
 
     def test_no_line_is_lost_when_a_session_attaches_or_detaches(self) -> None:
@@ -646,19 +796,35 @@ class ReaderTests(HostTest):
             session = FakeSession(f"worker-round-{round_number}")
             self.host.attach("chat-a", session)
             sessions.append(session)
-            self.codex.emit({"method": "item/completed", "params": {"threadId": thread_id, "n": round_number}})
-            self.assertTrue(wait_until(lambda session=session: len(session.received) == 1))
+            self.codex.emit(
+                {
+                    "method": "item/completed",
+                    "params": {"threadId": thread_id, "n": round_number},
+                }
+            )
+            self.assertTrue(
+                wait_until(lambda session=session: len(session.received) == 1)
+            )
             self.host.detach("chat-a")
-        self.assertEqual([s.received[0]["params"]["n"] for s in sessions], list(range(5)))
+        self.assertEqual(
+            [s.received[0]["params"]["n"] for s in sessions], list(range(5))
+        )
 
     def test_a_sub_agent_line_reaches_its_chat_session(self) -> None:
         self.start()
         session = self.begin("chat-a")
         parent = self.host.chat("chat-a").thread_id
         self.codex.emit(spawn_item(parent, "child-1"))
-        self.codex.emit({"method": "item/completed", "params": {"threadId": "child-1", "n": 1}})
-        self.codex.emit({"id": "codex-child", "method": "item/commandExecution/requestApproval",
-                         "params": {"threadId": "child-1"}})
+        self.codex.emit(
+            {"method": "item/completed", "params": {"threadId": "child-1", "n": 1}}
+        )
+        self.codex.emit(
+            {
+                "id": "codex-child",
+                "method": "item/commandExecution/requestApproval",
+                "params": {"threadId": "child-1"},
+            }
+        )
         self.assertTrue(wait_until(lambda: len(session.received) == 3))
         self.assertEqual(self.host.chat_for_thread("child-1"), "chat-a")
         self.assertFalse(any(m.get("id") == "codex-child" for m in self.codex.sent))
@@ -685,8 +851,18 @@ class ReaderTests(HostTest):
         self.start()
         first, second = self.begin("chat-a"), self.begin("chat-b")
         first.raise_on = "item/permissions/bad"
-        self.codex.emit({"method": "item/permissions/bad", "params": {"threadId": self.host.chat("chat-a").thread_id}})
-        self.codex.emit({"method": "item/completed", "params": {"threadId": self.host.chat("chat-b").thread_id}})
+        self.codex.emit(
+            {
+                "method": "item/permissions/bad",
+                "params": {"threadId": self.host.chat("chat-a").thread_id},
+            }
+        )
+        self.codex.emit(
+            {
+                "method": "item/completed",
+                "params": {"threadId": self.host.chat("chat-b").thread_id},
+            }
+        )
         self.assertTrue(wait_until(lambda: first.failed and second.received))
         self.assertEqual(second.failed, "")
         self.assertTrue(self.host.running())
@@ -696,27 +872,44 @@ class ReaderTests(HostTest):
         session = self.begin("chat-a")
         self.codex.emit("not json\n")
         self.codex.emit("[1, 2]\n")
-        self.codex.emit({"method": "item/completed", "params": {"threadId": self.host.chat("chat-a").thread_id}})
+        self.codex.emit(
+            {
+                "method": "item/completed",
+                "params": {"threadId": self.host.chat("chat-a").thread_id},
+            }
+        )
         self.assertTrue(wait_until(lambda: len(session.received) == 1))
         self.assertTrue(self.host.running())
 
 
 class ExchangeTests(HostTest):
-    def test_a_changed_session_file_pauses_and_wakes_the_chat_before_the_turn(self) -> None:
+    def test_a_changed_session_file_pauses_and_wakes_the_chat_before_the_turn(
+        self,
+    ) -> None:
         self.start()
         self.begin("chat-a")
         self.host.detach("chat-a")
         thread_id = self.host.chat("chat-a").thread_id
-        Path(self.tmp.name, f"{thread_id}.jsonl").write_text("a turn from another process\n")
+        Path(self.tmp.name, f"{thread_id}.jsonl").write_text(
+            "a turn from another process\n"
+        )
         self.host.attach("chat-a", FakeSession("worker-next"))
-        self.assertEqual([m["params"]["threadId"] for m in self.codex.methods("thread/unsubscribe")], [thread_id])
-        self.assertEqual([m["params"]["threadId"] for m in self.codex.methods("thread/resume")], [thread_id])
+        self.assertEqual(
+            [m["params"]["threadId"] for m in self.codex.methods("thread/unsubscribe")],
+            [thread_id],
+        )
+        self.assertEqual(
+            [m["params"]["threadId"] for m in self.codex.methods("thread/resume")],
+            [thread_id],
+        )
         self.assertIn("session file changed", " ".join(self.logs))
 
     def test_an_unchanged_session_file_wakes_nothing(self) -> None:
         self.start()
         self.begin("chat-a")
-        Path(self.tmp.name, f"{self.host.chat('chat-a').thread_id}.jsonl").write_text("this exchange's own turn\n")
+        Path(self.tmp.name, f"{self.host.chat('chat-a').thread_id}.jsonl").write_text(
+            "this exchange's own turn\n"
+        )
         self.host.detach("chat-a")
         self.host.attach("chat-a", FakeSession("worker-next"))
         self.assertEqual(self.codex.methods("thread/unsubscribe"), [])
@@ -733,10 +926,26 @@ class ExchangeTests(HostTest):
         self.start()
         first, second = self.begin("chat-a"), self.begin("chat-b")
         thread_a = self.host.chat("chat-a").thread_id
-        self.codex.emit({"method": "turn/started", "params": {"threadId": thread_a, "turn": {"id": "turn-a"}}})
+        self.codex.emit(
+            {
+                "method": "turn/started",
+                "params": {"threadId": thread_a, "turn": {"id": "turn-a"}},
+            }
+        )
         self.assertTrue(wait_until(lambda: self.host.chat("chat-a").turn_running))
-        threading.Timer(0.1, self.codex.emit, [{"method": "turn/completed", "params": {
-            "threadId": thread_a, "turn": {"id": "turn-a", "status": "interrupted"}}}]).start()
+        threading.Timer(
+            0.1,
+            self.codex.emit,
+            [
+                {
+                    "method": "turn/completed",
+                    "params": {
+                        "threadId": thread_a,
+                        "turn": {"id": "turn-a", "status": "interrupted"},
+                    },
+                }
+            ],
+        ).start()
         self.assertTrue(self.host.cancel("chat-a", timeout=WAIT))
         self.assertTrue(first.closed)
         self.assertFalse(second.closed)
@@ -747,15 +956,24 @@ class ExchangeTests(HostTest):
         self.start()
         self.begin("chat-a")
         thread_a = self.host.chat("chat-a").thread_id
-        self.codex.emit({"method": "turn/started", "params": {"threadId": thread_a, "turn": {"id": "turn-a"}}})
+        self.codex.emit(
+            {
+                "method": "turn/started",
+                "params": {"threadId": thread_a, "turn": {"id": "turn-a"}},
+            }
+        )
         self.assertTrue(wait_until(lambda: self.host.chat("chat-a").turn_running))
         self.assertFalse(self.host.cancel("chat-a", timeout=0.1))
         self.assertTrue(self.host.restart_due)
 
-    def test_a_canceled_turn_that_was_asked_for_but_not_started_is_waited_for(self) -> None:
+    def test_a_canceled_turn_that_was_asked_for_but_not_started_is_waited_for(
+        self,
+    ) -> None:
         self.start()
         session = self.begin("chat-a")
-        session.turn_running = True  # turn/start was sent; turn/started has not arrived.
+        session.turn_running = (
+            True  # turn/start was sent; turn/started has not arrived.
+        )
         self.assertFalse(self.host.cancel("chat-a", timeout=0.1))
         self.assertTrue(self.host.restart_due)
 
@@ -763,9 +981,19 @@ class ExchangeTests(HostTest):
         self.start()
         self.begin("chat-a")
         parent = self.host.chat("chat-a").thread_id
-        self.codex.emit({"method": "turn/started", "params": {"threadId": parent, "turn": {"id": "turn-a"}}})
+        self.codex.emit(
+            {
+                "method": "turn/started",
+                "params": {"threadId": parent, "turn": {"id": "turn-a"}},
+            }
+        )
         self.codex.emit(spawn_item(parent, "child-1"))
-        self.codex.emit({"method": "turn/completed", "params": {"threadId": "child-1", "turn": {"id": "turn-c"}}})
+        self.codex.emit(
+            {
+                "method": "turn/completed",
+                "params": {"threadId": "child-1", "turn": {"id": "turn-c"}},
+            }
+        )
         self.codex.emit({"method": "item/completed", "params": {"threadId": "marker"}})
         time.sleep(0.05)
         self.assertTrue(self.host.chat("chat-a").turn_running)
@@ -782,7 +1010,9 @@ class FailurePathTests(HostTest):
         self.assertEqual(self.host.live_chats(), [])
         with self.assertRaises(HostError):
             self.host.attach("chat-a", FakeSession("worker-a"))
-        self.assertTrue(wait_until(lambda: len(self.processes) == 2 and self.host.running()))
+        self.assertTrue(
+            wait_until(lambda: len(self.processes) == 2 and self.host.running())
+        )
         self.assertEqual(self.codex.methods("thread/resume"), [])
 
     def test_a_chat_whose_tools_fail_is_unloaded_so_the_cap_holds(self) -> None:
@@ -810,7 +1040,9 @@ class FailurePathTests(HostTest):
             self.wake("chat-a")
         self.assertTrue(self.host.restart_due)
 
-    def test_a_restart_never_fails_an_exchange_that_starts_during_the_check(self) -> None:
+    def test_a_restart_never_fails_an_exchange_that_starts_during_the_check(
+        self,
+    ) -> None:
         lock = ReleaseHookLock()
         self.host = self.make_host(lock=lock)
         self.start()
@@ -878,7 +1110,9 @@ class FailurePathTests(HostTest):
 
         self.on_spawn = first_never_answers
         self.assertFalse(self.host.ready_for_message())
-        self.assertTrue(wait_until(lambda: len(self.processes) == 2 and self.host.running()))
+        self.assertTrue(
+            wait_until(lambda: len(self.processes) == 2 and self.host.running())
+        )
         time.sleep(0.05)
         self.assertTrue(self.host.running())
         self.assertFalse(self.processes[1].reaped)
@@ -897,9 +1131,17 @@ class FailurePathTests(HostTest):
     def test_a_tool_notice_of_an_unknown_thread_does_not_count(self) -> None:
         self.start()
         self.codex.tool_status = "starting"
-        self.codex.after_thread = [{"method": "mcpServer/startupStatus/updated",
-                                    "params": {"name": name, "status": "ready", "threadId": "unknown-thread"}}
-                                   for name in TOOLS]
+        self.codex.after_thread = [
+            {
+                "method": "mcpServer/startupStatus/updated",
+                "params": {
+                    "name": name,
+                    "status": "ready",
+                    "threadId": "unknown-thread",
+                },
+            }
+            for name in TOOLS
+        ]
         with self.assertRaisesRegex(HostError, "not ready in time"):
             self.wake("chat-a")
         self.assertEqual(self.host.live_chats(), [])

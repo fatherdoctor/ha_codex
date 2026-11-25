@@ -5,13 +5,15 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+from pathlib import Path
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("bundle_integration", ROOT / "scripts" / "bundle_integration.py")
+SPEC = importlib.util.spec_from_file_location(
+    "bundle_integration", ROOT / "scripts" / "bundle_integration.py"
+)
 bi = importlib.util.module_from_spec(SPEC)
 sys.modules["bundle_integration"] = bi
 SPEC.loader.exec_module(bi)
@@ -27,7 +29,14 @@ class BundleIntegrationTests(unittest.TestCase):
         bi.ROOT = base
         bi.SOURCE = base / "custom_components" / "codex_cli"
         bi.BUNDLE = base / "codex-cli-worker" / "integration" / "codex_cli"
-        self.write(bi.SOURCE, {"manifest.json": MANIFEST, "__init__.py": "NEW = 1\n", "core_logs.py": "x = 1\n"})
+        self.write(
+            bi.SOURCE,
+            {
+                "manifest.json": MANIFEST,
+                "__init__.py": "NEW = 1\n",
+                "core_logs.py": "x = 1\n",
+            },
+        )
 
     def tearDown(self) -> None:
         bi.ROOT, bi.SOURCE, bi.BUNDLE = self.saved
@@ -48,13 +57,22 @@ class BundleIntegrationTests(unittest.TestCase):
 
     def test_check_refuses_a_stale_copy_with_the_same_version(self) -> None:
         # The case found in a drop: same manifest version, but files removed, added and changed since.
-        self.write(bi.BUNDLE, {"manifest.json": MANIFEST, "__init__.py": "OLD = 1\n", "kiosk.py": "y = 1\n"})
+        self.write(
+            bi.BUNDLE,
+            {
+                "manifest.json": MANIFEST,
+                "__init__.py": "OLD = 1\n",
+                "kiosk.py": "y = 1\n",
+            },
+        )
         code, out = self.run_main("--check")
         self.assertEqual(code, 1)
         self.assertIn("missing: core_logs.py", out)
         self.assertIn("extra: kiosk.py", out)
         self.assertIn("changed: __init__.py", out)
-        self.assertTrue((bi.BUNDLE / "kiosk.py").exists(), "--check must change nothing")
+        self.assertTrue(
+            (bi.BUNDLE / "kiosk.py").exists(), "--check must change nothing"
+        )
 
     def test_check_refuses_a_missing_copy(self) -> None:
         code, out = self.run_main("--check")

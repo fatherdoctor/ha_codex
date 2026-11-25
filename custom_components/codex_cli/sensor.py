@@ -5,9 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, PERCENTAGE
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -21,7 +25,14 @@ PARALLEL_UPDATES = 0
 PROMPT_KINDS = ("command", "command_input", "file_change", "other")
 # The task states the worker reports (TASK_STATUSES in codex-cli-worker/server.py); the Last task sensor is an
 # enum of these, and its state is unknown (None) while the worker has no task.
-TASK_STATES = ["queued", "running", "waiting_for_input", "completed", "failed", "cancelled"]
+TASK_STATES = [
+    "queued",
+    "running",
+    "waiting_for_input",
+    "completed",
+    "failed",
+    "cancelled",
+]
 AUTH_STATES = ["logged_in", "auth_file_present", "not_logged_in"]
 
 
@@ -52,7 +63,9 @@ class _CodexSensor(CoordinatorEntity[CodexCliCoordinator], SensorEntity):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, coordinator: CodexCliCoordinator, entry: ConfigEntry, key: str) -> None:
+    def __init__(
+        self, coordinator: CodexCliCoordinator, entry: ConfigEntry, key: str
+    ) -> None:
         """Set the unique ID from the entry ID and key, and attach the sensor to the Codex device of the config entry."""
         super().__init__(coordinator)
         self._entry = entry
@@ -334,7 +347,8 @@ class CodexWeeklyLimitSensor(_CodexSensor):
             "reset_text": usage.get("weekly_reset"),
             "five_hour_limit": usage.get("five_hour_limit"),
             "five_hour_percent": usage.get("five_hour_percent"),
-            "five_hour_reset": usage.get("five_hour_reset_at") or usage.get("five_hour_reset"),
+            "five_hour_reset": usage.get("five_hour_reset_at")
+            or usage.get("five_hour_reset"),
             "five_hour_reset_text": usage.get("five_hour_reset"),
             "context_remaining": usage.get("context_remaining"),
             "context_percent": usage.get("context_percent"),

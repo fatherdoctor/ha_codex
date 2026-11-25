@@ -5,6 +5,7 @@ This bridge only forwards the request to the worker's socket, with the thread id
 call. Under remote control the relay sets HA_CALL_SOCKET to the app's own socket. The worker checks the chat
 (or, on the app's socket, that the relay runs) and the form of the request (ha_call.py).
 """
+
 from __future__ import annotations
 
 import json
@@ -30,30 +31,62 @@ TOOL = {
         "home_assistant_mcp's call_service_tool, which cannot return their data."
     ),
     "inputSchema": {
-        "type": "object", "additionalProperties": False,
+        "type": "object",
+        "additionalProperties": False,
         "properties": {
-            "service": {"type": "string", "maxLength": 200,
-                        "description": "domain.service, for example light.turn_on"},
-            "target": {"type": "object", "additionalProperties": False,
-                       "properties": {key: {"anyOf": [{"type": "string"},
-                                                      {"type": "array", "items": {"type": "string"}}]}
-                                      for key in ("entity_id", "device_id", "area_id", "floor_id", "label_id")}},
-            "data": {"type": "object", "description": "The service's other fields, for example brightness_pct"},
-            "name": {"type": "string", "maxLength": 120,
-                     "description": "The device's name as the person said it, for example kitchen ceiling; "
-                                    "in place of target"},
+            "service": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "domain.service, for example light.turn_on",
+            },
+            "target": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    key: {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ]
+                    }
+                    for key in (
+                        "entity_id",
+                        "device_id",
+                        "area_id",
+                        "floor_id",
+                        "label_id",
+                    )
+                },
+            },
+            "data": {
+                "type": "object",
+                "description": "The service's other fields, for example brightness_pct",
+            },
+            "name": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "The device's name as the person said it, for example kitchen ceiling; "
+                "in place of target",
+            },
         },
         "required": ["service"],
     },
     # A tool that changes things: Codex treats it as one that needs the person's answer.
-    "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True},
+    "annotations": {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
 }
 MAX_REQUEST_BYTES = 65536
 
 
 def call(arguments, thread_id):
     """Forward the arguments and the call's thread id to the worker once; return its answer."""
-    encoded = json.dumps({"thread_id": thread_id, "arguments": arguments}).encode() + b"\n"
+    encoded = (
+        json.dumps({"thread_id": thread_id, "arguments": arguments}).encode() + b"\n"
+    )
     if len(encoded) > MAX_REQUEST_BYTES:
         raise ValueError("Call request is too large")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -71,8 +104,11 @@ def respond(request):
     """Implement the MCP initialization, discovery and single-tool request surface."""
     method = request.get("method")
     if method == "initialize":
-        return {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}},
-                "serverInfo": {"name": "home-assistant-call", "version": "1.0"}}
+        return {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "home-assistant-call", "version": "1.0"},
+        }
     if method == "ping":
         return {}
     if method == "tools/list":
@@ -82,13 +118,19 @@ def respond(request):
         try:
             if params.get("name") != TOOL["name"]:
                 raise ValueError("Unknown tool")
-            result = call(params.get("arguments", {}), tool_threads.thread_id_from_call(params))
+            result = call(
+                params.get("arguments", {}), tool_threads.thread_id_from_call(params)
+            )
         except (OSError, ValueError, TypeError):
             # A timeout is an OSError: the action may have reached Home Assistant, so read the state back.
-            result = {"status": "unavailable",
-                      "message": "No answer from the worker; read the state back before you try again"}
-        return {"content": [{"type": "text", "text": json.dumps(result)}],
-                "isError": result.get("status") != "ok"}
+            result = {
+                "status": "unavailable",
+                "message": "No answer from the worker; read the state back before you try again",
+            }
+        return {
+            "content": [{"type": "text", "text": json.dumps(result)}],
+            "isError": result.get("status") != "ok",
+        }
     raise ValueError("Method not found")
 
 
@@ -108,8 +150,16 @@ def main():
                 response["error"] = {"code": -32601, "message": "Unsupported request"}
             print(json.dumps(response), flush=True)
         except (ValueError, UnicodeError):
-            print(json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Invalid JSON"}}),
-                  flush=True)
+            print(
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32700, "message": "Invalid JSON"},
+                    }
+                ),
+                flush=True,
+            )
     return 0
 
 

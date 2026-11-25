@@ -1,13 +1,13 @@
 """Record the read-only push guard's verdicts and diagnostics on local Git ranges."""
 
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -26,7 +26,10 @@ class PushGuardRangeTests(unittest.TestCase):
         for path in (self.names, self.shrink, self.binary):
             path.touch()
         self.enterContext(
-            patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+            patch.dict(
+                os.environ,
+                {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+            )
         )
         self.git("init", "--quiet", "--template=")
         self.git("config", "user.name", "Fixture")
@@ -55,11 +58,16 @@ class PushGuardRangeTests(unittest.TestCase):
         with redirect_stdout(stdout), redirect_stderr(stderr):
             code = push_guard.main(
                 [
-                    "--repo", str(self.repo),
-                    "--range", revision or f"{self.base}..HEAD",
-                    "--names", str(self.names),
-                    "--shrink", str(self.shrink),
-                    "--binary", str(self.binary),
+                    "--repo",
+                    str(self.repo),
+                    "--range",
+                    revision or f"{self.base}..HEAD",
+                    "--names",
+                    str(self.names),
+                    "--shrink",
+                    str(self.shrink),
+                    "--binary",
+                    str(self.binary),
                 ]
             )
         return code, stdout.getvalue(), stderr.getvalue()
@@ -103,7 +111,9 @@ class PushGuardRangeTests(unittest.TestCase):
         self.commit("Shorten the notes")
         code, stdout, _ = self.check_range()
         self.assertEqual(code, 1)
-        self.assertIn("ABORT shrink (24 -> 5 lines; a truncating write?): notes.md\n", stdout)
+        self.assertIn(
+            "ABORT shrink (24 -> 5 lines; a truncating write?): notes.md\n", stdout
+        )
 
     def test_bad_range_reports_a_git_error(self):
         code, stdout, stderr = self.check_range("missing-example-ref..HEAD")

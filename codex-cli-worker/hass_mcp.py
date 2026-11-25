@@ -32,6 +32,7 @@ AUDITING.md says the same.
 Every chat gets the server: a page chat, a codex_cli.start_task task, a scheduled run (a normal chat that a
 schedule wakes up) and the relay.
 """
+
 from __future__ import annotations
 
 import json
@@ -113,5 +114,11 @@ def mcp_args(options: dict[str, Any], python: str, relay: bool = False) -> list[
     """Return the --config arguments that register the server, or none when the option is off."""
     if not enabled(options):
         return []
-    return [argument for name, value in settings(python, relay).items()
-            for argument in ("--config", f"mcp_servers.{SERVER_NAME}.{name}={json.dumps(value)}")]
+    return [
+        argument
+        for name, value in settings(python, relay).items()
+        for argument in (
+            "--config",
+            f"mcp_servers.{SERVER_NAME}.{name}={json.dumps(value)}",
+        )
+    ]

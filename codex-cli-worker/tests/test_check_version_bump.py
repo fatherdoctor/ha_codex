@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-SPEC = importlib.util.spec_from_file_location("check_version_bump", ROOT / "scripts" / "check_version_bump.py")
+SPEC = importlib.util.spec_from_file_location(
+    "check_version_bump", ROOT / "scripts" / "check_version_bump.py"
+)
 cvb = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(cvb)
 ReleaseError = sys.modules["fork_release"].ReleaseError
@@ -23,7 +25,9 @@ MANIFEST = '{{\n  "domain": "codex_cli",\n  "name": "Codex",\n  "version": "{v}"
 
 
 def run(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 class VersionRuleTests(unittest.TestCase):
@@ -44,8 +48,10 @@ class VersionRuleTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def set_versions(self, config: str, manifest: str | None = None) -> None:
-        for path, text in ((cvb.WORKER_CONFIG, CONFIG.format(v=config)),
-                           (cvb.MANIFEST, MANIFEST.format(v=manifest or config))):
+        for path, text in (
+            (cvb.WORKER_CONFIG, CONFIG.format(v=config)),
+            (cvb.MANIFEST, MANIFEST.format(v=manifest or config)),
+        ):
             target = self.repo / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
@@ -61,11 +67,17 @@ class VersionRuleTests(unittest.TestCase):
     # pull requests that keep the version
 
     def test_a_feature_that_leaves_the_version_alone_passes(self) -> None:
-        (self.repo / "codex-cli-worker" / "server.py").write_text("print('new')\n", encoding="utf-8")
+        (self.repo / "codex-cli-worker" / "server.py").write_text(
+            "print('new')\n", encoding="utf-8"
+        )
         self.commit("feature")
-        self.assertEqual(self.check("Add a feature"), "ok: the version is unchanged (0.3.5)")
+        self.assertEqual(
+            self.check("Add a feature"), "ok: the version is unchanged (0.3.5)"
+        )
 
-    def test_a_release_merged_to_main_after_the_branch_started_does_not_count_against_it(self) -> None:
+    def test_a_release_merged_to_main_after_the_branch_started_does_not_count_against_it(
+        self,
+    ) -> None:
         self.commit("feature")
         run(self.repo, "checkout", "-q", "main")
         self.set_versions("0.3.6")
@@ -85,7 +97,9 @@ class VersionRuleTests(unittest.TestCase):
     def test_a_feature_that_raises_the_version_is_refused(self) -> None:
         self.set_versions("0.3.6")
         self.commit("feature and version")
-        with self.assertRaisesRegex(cvb.VersionRuleError, "changes the version .*0.3.5 -> 0.3.6"):
+        with self.assertRaisesRegex(
+            cvb.VersionRuleError, "changes the version .*0.3.5 -> 0.3.6"
+        ):
             self.check("Remove the grant layer")
 
     def test_a_change_to_one_file_only_is_refused(self) -> None:
@@ -103,8 +117,15 @@ class VersionRuleTests(unittest.TestCase):
     def test_titles_that_only_mention_a_release_are_not_release_titles(self) -> None:
         self.set_versions("0.3.6")
         self.commit("raise")
-        for title in ("release 0.3.6", "Prepare Release 0.3.6", "Release notes for 0.3.6", "Releases 0.3.6",
-                      "Release", "Release: 0.3.6", ""):
+        for title in (
+            "release 0.3.6",
+            "Prepare Release 0.3.6",
+            "Release notes for 0.3.6",
+            "Releases 0.3.6",
+            "Release",
+            "Release: 0.3.6",
+            "",
+        ):
             with self.subTest(title=title), self.assertRaises(cvb.VersionRuleError):
                 self.check(title)
 
@@ -113,8 +134,13 @@ class VersionRuleTests(unittest.TestCase):
     def test_the_release_pull_request_for_the_new_version_passes(self) -> None:
         self.set_versions("0.3.6")
         self.commit("release")
-        for title in ("Release 0.3.6", "Release v0.3.6", "Release 0.3.6: roll back to 0.3.4",
-                      "Release 0.3.6 with the new settings page", "  Release 0.3.6"):
+        for title in (
+            "Release 0.3.6",
+            "Release v0.3.6",
+            "Release 0.3.6: roll back to 0.3.4",
+            "Release 0.3.6 with the new settings page",
+            "  Release 0.3.6",
+        ):
             with self.subTest(title=title):
                 self.assertIn("ok: release pull request for 0.3.6", self.check(title))
 
@@ -153,11 +179,20 @@ class VersionRuleTests(unittest.TestCase):
     def test_exit_codes(self) -> None:
         self.set_versions("0.3.6")
         self.commit("raise")
-        self.assertEqual(self.main("--base", "main", "--head", "feature", "--title", "Release 0.3.6")[0], 0)
-        code, _, err = self.main("--base", "main", "--head", "feature", "--title", "Add a feature")
+        self.assertEqual(
+            self.main(
+                "--base", "main", "--head", "feature", "--title", "Release 0.3.6"
+            )[0],
+            0,
+        )
+        code, _, err = self.main(
+            "--base", "main", "--head", "feature", "--title", "Add a feature"
+        )
         self.assertEqual(code, 1)
         self.assertIn("refused: this pull request changes the version", err)
-        code, _, err = self.main("--base", "main", "--head", "no-such-branch", "--title", "Add a feature")
+        code, _, err = self.main(
+            "--base", "main", "--head", "no-such-branch", "--title", "Add a feature"
+        )
         self.assertEqual(code, 2)
         self.assertIn("error:", err)
 

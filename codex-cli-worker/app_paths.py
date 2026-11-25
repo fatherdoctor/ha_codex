@@ -4,6 +4,7 @@ config.yaml maps homeassistant_config at /homeassistant, the Supervisor's defaul
 uses, so a path copied from one assistant works in the other. Every module reads the folder from CONFIG_ROOT;
 tests/test_config_root.py fails on any other spelling of it in the worker's code.
 """
+
 from pathlib import Path
 
 CONFIG_ROOT = Path("/homeassistant")
@@ -18,5 +19,5 @@ OLD_CONFIG_ROOT = "/config"
 def from_old_config_path(value: str, root: Path) -> str:
     """Return a path saved by a version before 0.6 as the same path under root (CONFIG_ROOT); others as they are."""
     if value == OLD_CONFIG_ROOT or value.startswith(OLD_CONFIG_ROOT + "/"):
-        return root.as_posix() + value[len(OLD_CONFIG_ROOT):]
+        return root.as_posix() + value[len(OLD_CONFIG_ROOT) :]
     return value

@@ -1,12 +1,12 @@
 """Record the launcher's argument, environment, and failure behavior."""
 
+from contextlib import redirect_stderr
 import io
+from pathlib import Path
 import sys
 import tempfile
-import unittest
-from contextlib import redirect_stderr
-from pathlib import Path
 from types import SimpleNamespace
+import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -42,7 +42,11 @@ class LauncherTests(unittest.TestCase):
         self.execve = Mock()
         self.environ = {}
         self.enterContext(
-            patch.object(launcher, "os", SimpleNamespace(environ=self.environ, execve=self.execve))
+            patch.object(
+                launcher,
+                "os",
+                SimpleNamespace(environ=self.environ, execve=self.execve),
+            )
         )
 
     def test_server_environment_sets_its_options_and_preserves_unrelated_values(self):

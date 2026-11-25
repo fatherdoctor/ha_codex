@@ -1,16 +1,20 @@
 """Characterize the current MCP bridges over their newline-delimited stdio."""
+
 import importlib
 import json
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
-
 BRIDGES = (
-    "github_mcp", "ha_call_mcp", "ha_data_mcp", "relay_reads_mcp",
-    "scheduling_mcp", "verification_mcp",
+    "github_mcp",
+    "ha_call_mcp",
+    "ha_data_mcp",
+    "relay_reads_mcp",
+    "scheduling_mcp",
+    "verification_mcp",
 )
 WORKER = Path(__file__).resolve().parents[1]
 if str(WORKER) not in sys.path:
@@ -22,27 +26,42 @@ def line(value):
 
 
 def run_bridge(name, data):
-    return subprocess.run([sys.executable, "-B", str(WORKER / (name + ".py"))],
-                          input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          timeout=10, check=False)
+    return subprocess.run(
+        [sys.executable, "-B", str(WORKER / (name + ".py"))],
+        input=data,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
+    )
 
 
 @pytest.mark.parametrize("name", BRIDGES)
 def test_requests_notifications_errors_and_eof(name):
-    data = b"".join((
-        line({"jsonrpc": "2.0", "method": "notifications/initialized"}),
-        line({"jsonrpc": "2.0", "id": 1, "method": "initialize"}),
-        line({"jsonrpc": "2.0", "id": "ping-id", "method": "ping"}),
-        line({"jsonrpc": "2.0", "id": 3, "method": "tools/list"}),
-        b"not-json\n", b"\xff\n",
-        line({"jsonrpc": "2.0", "id": 4, "method": "unknown"}),
-    ))
+    data = b"".join(
+        (
+            line({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            line({"jsonrpc": "2.0", "id": 1, "method": "initialize"}),
+            line({"jsonrpc": "2.0", "id": "ping-id", "method": "ping"}),
+            line({"jsonrpc": "2.0", "id": 3, "method": "tools/list"}),
+            b"not-json\n",
+            b"\xff\n",
+            line({"jsonrpc": "2.0", "id": 4, "method": "unknown"}),
+        )
+    )
     proc = run_bridge(name, data)
     assert proc.returncode == 0
     assert proc.stderr == b""
     assert proc.stdout.endswith(b"\n")
     responses = [json.loads(raw) for raw in proc.stdout.splitlines()]
-    assert [response["id"] for response in responses] == [1, "ping-id", 3, None, None, 4]
+    assert [response["id"] for response in responses] == [
+        1,
+        "ping-id",
+        3,
+        None,
+        None,
+        4,
+    ]
     assert all(response["jsonrpc"] == "2.0" for response in responses)
     assert responses[0]["result"]["protocolVersion"] == "2024-11-05"
     assert responses[0]["result"]["serverInfo"]["name"]
@@ -84,8 +103,12 @@ def test_tool_call_returns_a_framed_error_for_unknown_tool(name):
 def test_tool_call_forwards_arguments_and_reports_transport_failure(name, monkeypatch):
     module = importlib.import_module(name)
     adapter = {
-        "github_mcp": "fetch", "ha_call_mcp": "call", "ha_data_mcp": "fetch",
-        "relay_reads_mcp": "read", "scheduling_mcp": "fetch", "verification_mcp": "verify",
+        "github_mcp": "fetch",
+        "ha_call_mcp": "call",
+        "ha_data_mcp": "fetch",
+        "relay_reads_mcp": "read",
+        "scheduling_mcp": "fetch",
+        "verification_mcp": "verify",
     }[name]
     available = module.respond({"method": "tools/list"})["tools"]
     tool_name = available[0]["name"]
@@ -96,8 +119,14 @@ def test_tool_call_forwards_arguments_and_reports_transport_failure(name, monkey
         return {"ok": True, "status": "ok", "text": "sample"}
 
     monkeypatch.setattr(module, adapter, success)
-    request = {"method": "tools/call", "params": {"name": tool_name, "arguments": {"sample": 1},
-                                                  "_meta": {"threadId": "thread-1"}}}
+    request = {
+        "method": "tools/call",
+        "params": {
+            "name": tool_name,
+            "arguments": {"sample": 1},
+            "_meta": {"threadId": "thread-1"},
+        },
+    }
     result = module.respond(request)
     assert result["isError"] is False
     assert result["content"][0]["type"] == "text"

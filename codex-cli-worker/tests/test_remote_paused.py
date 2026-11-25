@@ -1,16 +1,16 @@
 """Remote Control is paused in this version: no process starts, the owner's saved choice is kept, the routes say so."""
+
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import io
 import json
+from pathlib import Path
 import tempfile
 import unittest
-from contextlib import redirect_stdout
-from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server  # First: it puts the worker's folder on sys.path.
-
 import remote_control as rc
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,22 +35,34 @@ class PausedSupervisorTests(unittest.TestCase):
 
         def popen(cmd, **_kwargs):
             self.launches.append(cmd)
-            raise AssertionError("the remote-control process must not start while paused")
+            raise AssertionError(
+                "the remote-control process must not start while paused"
+            )
 
-        self.sup = rc.Supervisor(codex_binary="/usr/local/bin/codex", state_path=self.state, env_factory=dict,
-                                 name_factory=lambda: "Home Assistant", popen=popen)
+        self.sup = rc.Supervisor(
+            codex_binary="/usr/local/bin/codex",
+            state_path=self.state,
+            env_factory=dict,
+            name_factory=lambda: "Home Assistant",
+            popen=popen,
+        )
 
     def saved(self) -> str:
         return self.state.read_text(encoding="utf-8")
 
-    def test_resume_of_an_owner_who_had_it_on_logs_once_and_keeps_the_choice(self) -> None:
+    def test_resume_of_an_owner_who_had_it_on_logs_once_and_keeps_the_choice(
+        self,
+    ) -> None:
         self.sup.save_enabled(True)
         before = self.saved()
         out = io.StringIO()
         with redirect_stdout(out):
             state = self.sup.resume()
         self.assertEqual(out.getvalue().strip(), rc.PAUSED_KEPT_LOG)
-        self.assertEqual((state["state"], state["message"], state["paused"]), ("paused", rc.PAUSED_MESSAGE, True))
+        self.assertEqual(
+            (state["state"], state["message"], state["paused"]),
+            ("paused", rc.PAUSED_MESSAGE, True),
+        )
         self.assertEqual(self.saved(), before)
         self.assertIsNone(self.sup.thread)
         self.assertEqual(self.launches, [])
@@ -93,26 +105,40 @@ class PausedRouteTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.options = Path(tmp.name) / "options.json"
-        self.options.write_text(json.dumps({"remote_control_name": "Home Assistant"}), encoding="utf-8")
+        self.options.write_text(
+            json.dumps({"remote_control_name": "Home Assistant"}), encoding="utf-8"
+        )
         state_path = Path(tmp.name) / "remote_control.json"
         state_path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
         for patcher in (
             patch.object(rc, "PAUSED", True),
             patch.object(server.remote_control_supervisor, "state_path", state_path),
-            patch.object(server.remote_control_supervisor, "popen", side_effect=AssertionError("no launch")),
+            patch.object(
+                server.remote_control_supervisor,
+                "popen",
+                side_effect=AssertionError("no launch"),
+            ),
             patch.object(server, "OPTIONS_PATH", self.options),
             patch.object(server, "api_token", return_value="tok"),
-            patch.object(server, "ingress_admin", return_value=({"user_id": "fixture-admin"}, "")),
+            patch.object(
+                server, "ingress_admin", return_value=({"user_id": "fixture-admin"}, "")
+            ),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.client = server.app.test_client()
-        self.ingress = {"headers": {"X-Ingress-Path": "/api/hassio_ingress/test"},
-                        "environ_overrides": {"REMOTE_ADDR": server.INGRESS_PROXY_IP}}
+        self.ingress = {
+            "headers": {"X-Ingress-Path": "/api/hassio_ingress/test"},
+            "environ_overrides": {"REMOTE_ADDR": server.INGRESS_PROXY_IP},
+        }
 
     def test_state_read_says_paused_and_runs_no_core_address_check(self) -> None:
-        with patch.object(server.core_address, "snapshot", side_effect=AssertionError("no probe")):
-            response = self.client.get("/remote-control", headers={"Authorization": "Bearer tok"})
+        with patch.object(
+            server.core_address, "snapshot", side_effect=AssertionError("no probe")
+        ):
+            response = self.client.get(
+                "/remote-control", headers={"Authorization": "Bearer tok"}
+            )
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertIs(body["paused"], True)
@@ -121,9 +147,16 @@ class PausedRouteTests(unittest.TestCase):
 
     def test_every_change_is_refused_and_the_options_stay(self) -> None:
         before = self.options.read_text(encoding="utf-8")
-        for action, body in (("start", {}), ("stop", {}), ("pair", {}), ("name", {"name": "Other"})):
+        for action, body in (
+            ("start", {}),
+            ("stop", {}),
+            ("pair", {}),
+            ("name", {"name": "Other"}),
+        ):
             with self.subTest(action=action):
-                response = self.client.post(f"/remote-control/{action}", json=body, **self.ingress)
+                response = self.client.post(
+                    f"/remote-control/{action}", json=body, **self.ingress
+                )
                 self.assertEqual(response.status_code, 409)
                 self.assertIs(response.get_json()["paused"], True)
                 self.assertEqual(response.get_json()["error"], rc.PAUSED_MESSAGE)
@@ -131,7 +164,9 @@ class PausedRouteTests(unittest.TestCase):
         self.assertTrue(server.remote_control_supervisor.enabled())
 
     def test_the_api_token_still_cannot_change_it(self) -> None:
-        response = self.client.post("/remote-control/start", headers={"Authorization": "Bearer tok"}, json={})
+        response = self.client.post(
+            "/remote-control/start", headers={"Authorization": "Bearer tok"}, json={}
+        )
         self.assertEqual(response.status_code, 403)
 
     def test_full_access_restart_keeps_the_choice_and_starts_nothing(self) -> None:
@@ -141,7 +176,9 @@ class PausedRouteTests(unittest.TestCase):
 
     def test_integration_summary_reports_paused(self) -> None:
         server.remote_control_supervisor.paused()
-        self.assertEqual(server.remote_control_summary(), {"enabled": True, "state": "paused"})
+        self.assertEqual(
+            server.remote_control_summary(), {"enabled": True, "state": "paused"}
+        )
 
 
 class PausedPageTests(unittest.TestCase):
@@ -158,13 +195,19 @@ class PausedPageTests(unittest.TestCase):
 
     def test_every_remote_part_is_marked(self) -> None:
         page = server.render_index()
-        for element in ('id="remote-status-row" data-remote', 'id="app-pairing-section" data-remote',
-                        'id="connection-dialog" data-remote', 'id="remote-control-section" data-remote',
-                        '<span data-remote>, the remote control name</span>'):
+        for element in (
+            'id="remote-status-row" data-remote',
+            'id="app-pairing-section" data-remote',
+            'id="connection-dialog" data-remote',
+            'id="remote-control-section" data-remote',
+            "<span data-remote>, the remote control name</span>",
+        ):
             with self.subTest(element=element):
                 self.assertIn(element, page)
         css = (ROOT / "web/assets/chat.css").read_text(encoding="utf-8")
-        self.assertIn("[data-remote-paused] [data-remote] {\n  display: none !important;", css)
+        self.assertIn(
+            "[data-remote-paused] [data-remote] {\n  display: none !important;", css
+        )
 
 
 if __name__ == "__main__":

@@ -5,14 +5,20 @@ server.main() calls the start-up steps that move and delete files there, so it m
 the layout. isolated_app_folders() gives a test that copy; snapshot() and changes() let conftest.py fail any test
 that still writes under the real folders.
 """
+
 import contextlib
 import os
-import sys
 from pathlib import Path
+import sys
 from unittest.mock import patch
 
 # /config is Home Assistant's folder in versions before 0.6; it is kept here so that no test makes it either.
-REAL_ROOTS = (Path("/data"), Path("/homeassistant"), Path("/addon_config"), Path("/config"))
+REAL_ROOTS = (
+    Path("/data"),
+    Path("/homeassistant"),
+    Path("/addon_config"),
+    Path("/config"),
+)
 
 
 def _under(path: Path, root: Path) -> bool:

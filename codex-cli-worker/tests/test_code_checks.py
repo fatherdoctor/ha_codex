@@ -20,16 +20,18 @@ Corpus families (CASES below; add a case there when a review finds a new shape):
 
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import importlib.util
 import io
+from pathlib import Path
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("code_checks", ROOT / "scripts" / "code_checks.py")
+SPEC = importlib.util.spec_from_file_location(
+    "code_checks", ROOT / "scripts" / "code_checks.py"
+)
 code_checks = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(code_checks)
 
@@ -45,23 +47,57 @@ CASES = [
     ("N1", "nesting", "x = (globals())[name]\n", "refuse"),
     ("N2", "nesting", "x = globals()[names[0]]\n", "refuse"),
     ("N3", "nesting", "f = lambda n: globals()[n]\n", "refuse"),
-    ("N4", "nesting", "class A:\n    def __getattr__(self, n):\n        return globals()[n]\n", "refuse"),
-    ("N5", "nesting", "def f():\n    def g(n):\n        return globals()[n]\n    return g\n", "refuse"),
+    (
+        "N4",
+        "nesting",
+        "class A:\n    def __getattr__(self, n):\n        return globals()[n]\n",
+        "refuse",
+    ),
+    (
+        "N5",
+        "nesting",
+        "def f():\n    def g(n):\n        return globals()[n]\n    return g\n",
+        "refuse",
+    ),
     ("W1", "wrappers", "x = vars()[name]\n", "refuse"),
     ("W2", "wrappers", "x = locals()[name]\n", "refuse"),
     ("W3", "wrappers", "import builtins\nx = builtins.globals()[name]\n", "refuse"),
     ("W4", "wrappers", "x = globals().get(name)\n", "refuse"),
     ("W5", "wrappers", "globals().setdefault(name, 1)\n", "refuse"),
-    ("W6", "wrappers", "import sys\nx = getattr(sys.modules[__name__], name)\n", "refuse"),
-    ("W7", "wrappers", "import sys\nx = sys.modules[__name__].__dict__[name]\n", "refuse"),
+    (
+        "W6",
+        "wrappers",
+        "import sys\nx = getattr(sys.modules[__name__], name)\n",
+        "refuse",
+    ),
+    (
+        "W7",
+        "wrappers",
+        "import sys\nx = sys.modules[__name__].__dict__[name]\n",
+        "refuse",
+    ),
     ("W8", "wrappers", "g = globals()\nx = g[name]\n", "refuse"),
     ("W9", "wrappers", "def f(n):\n    g = globals()\n    return g.get(n)\n", "refuse"),
     ("W10", "wrappers", "globals()[name] = value\n", "refuse"),
-    ("W11", "wrappers", "import sys\nsetattr(sys.modules[__name__], name, 1)\n", "refuse"),
+    (
+        "W11",
+        "wrappers",
+        "import sys\nsetattr(sys.modules[__name__], name, 1)\n",
+        "refuse",
+    ),
     ("W12", "wrappers", "x = vars(obj)[name]\n", "allow"),
-    ("W13", "wrappers", "from unittest.mock import patch\nwith patch.dict(globals(), {'A': 1}):\n    pass\n",
-     "allow"),
-    ("W14", "wrappers", "import sys\nx = getattr(sys.modules[__name__], 'CONFIG_ROOT')\n", "allow"),
+    (
+        "W13",
+        "wrappers",
+        "from unittest.mock import patch\nwith patch.dict(globals(), {'A': 1}):\n    pass\n",
+        "allow",
+    ),
+    (
+        "W14",
+        "wrappers",
+        "import sys\nx = getattr(sys.modules[__name__], 'CONFIG_ROOT')\n",
+        "allow",
+    ),
     ("W15", "wrappers", "x = getattr(obj, name)\n", "allow"),
     ("W16", "wrappers", "x = settings[name]\n", "allow"),
     ("W17", "wrappers", "globals().update(values)\n", "refuse"),
@@ -86,7 +122,9 @@ class GlobalsCorpusTests(unittest.TestCase):
         self.assertIn("allow", families["wrappers"])
 
     def test_reports_the_enclosing_function(self):
-        source = "class A:\n    def __getattr__(self, n):\n        return globals()[n]\n"
+        source = (
+            "class A:\n    def __getattr__(self, n):\n        return globals()[n]\n"
+        )
         self.assertEqual(code_checks.globals_by_name(source), [(3, "A.__getattr__")])
 
     def test_syntax_error_raises(self):
@@ -146,16 +184,22 @@ class TreeTests(unittest.TestCase):
     def test_exempt_file_passes_and_stale_exemption_fails(self):
         self.write("big.py", "x = 1\n" * 1500)
         self.write("small.py", "x = 1\n")
-        failures = code_checks.check_sizes(self.root, exempt={"big.py": "r", "small.py": "r", "gone.py": "r"})
+        failures = code_checks.check_sizes(
+            self.root, exempt={"big.py": "r", "small.py": "r", "gone.py": "r"}
+        )
         self.assertEqual(len(failures), 2)
         self.assertTrue(any("small.py is listed" in f for f in failures))
         self.assertTrue(any("gone.py is listed" in f for f in failures))
 
     def test_globals_exemption_is_by_file_and_function(self):
-        source = "class W:\n    def __getattr__(self, n):\n        return globals()[n]\n"
+        source = (
+            "class W:\n    def __getattr__(self, n):\n        return globals()[n]\n"
+        )
         self.write("server.py", source)
         self.write("other.py", source)
-        failures = code_checks.check_globals(self.root, exempt={("server.py", "W.__getattr__"): "r"})
+        failures = code_checks.check_globals(
+            self.root, exempt={("server.py", "W.__getattr__"): "r"}
+        )
         self.assertEqual(len(failures), 1)
         self.assertIn("other.py:3", failures[0])
 
@@ -170,17 +214,27 @@ class TreeTests(unittest.TestCase):
         self.assertEqual(len(code_checks.check_globals(self.root, exempt={})), 1)
 
     def test_server_patch_count_is_a_warning_only(self):
-        self.write("codex-cli-worker/tests/test_a.py",
-                   'patch("server.DATA_ROOT", x)\npatch.object(server, "run", y)\n'
-                   'monkeypatch.setattr(server, "X", 1)\npatch("other.X")\n')
+        self.write(
+            "codex-cli-worker/tests/test_a.py",
+            'patch("server.DATA_ROOT", x)\npatch.object(server, "run", y)\n'
+            'monkeypatch.setattr(server, "X", 1)\npatch("other.X")\n',
+        )
         self.write("elsewhere/test_b.py", 'patch("server.DATA_ROOT", x)\n')
-        self.assertEqual(code_checks.count_server_patches(self.root), {"codex-cli-worker/tests/test_a.py": 3})
+        self.assertEqual(
+            code_checks.count_server_patches(self.root),
+            {"codex-cli-worker/tests/test_a.py": 3},
+        )
         out = io.StringIO()
         with redirect_stdout(out):
             result = code_checks.main(["--root", str(self.root)])
-        self.assertIn("warning: tests patch names inside server.py 3 times", out.getvalue())
+        self.assertIn(
+            "warning: tests patch names inside server.py 3 times", out.getvalue()
+        )
         # The real exemption lists name files this invented tree lacks, so the run fails on them, not on the count.
-        self.assertNotIn("test_a.py", "".join(l for l in out.getvalue().splitlines() if l.startswith("FAIL")))
+        self.assertNotIn(
+            "test_a.py",
+            "".join(l for l in out.getvalue().splitlines() if l.startswith("FAIL")),
+        )
         self.assertEqual(result, 1)
 
 

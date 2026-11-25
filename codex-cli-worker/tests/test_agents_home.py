@@ -1,17 +1,17 @@
 """AGENTS.md lives in the app's own addon_config folder, and Codex loads it from there."""
+
 import contextlib
 import io
 import json
 import os
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-import yaml
-
-from app_folders import isolated_app_folders
 from test_server import server
+from app_folders import isolated_app_folders
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,9 +34,14 @@ class AgentsHome(unittest.TestCase):
         self.link = self.home / "AGENTS.md"
         self.backup = self.data / "agents_before_move.md"
         patches = patch.multiple(
-            server, AGENTS_PATH=self.agents, LEGACY_AGENTS_PATH=self.legacy, CODEX_HOME=self.home,
-            CODEX_AGENTS_LINK=self.link, AGENTS_MOVE_BACKUP=self.backup,
-            CODEX_CONFIG_PATH=self.home / "config.toml")
+            server,
+            AGENTS_PATH=self.agents,
+            LEGACY_AGENTS_PATH=self.legacy,
+            CODEX_HOME=self.home,
+            CODEX_AGENTS_LINK=self.link,
+            AGENTS_MOVE_BACKUP=self.backup,
+            CODEX_CONFIG_PATH=self.home / "config.toml",
+        )
         patches.start()
         self.addCleanup(patches.stop)
 
@@ -83,7 +88,9 @@ class AgentsHome(unittest.TestCase):
 
     def test_a_failed_move_keeps_the_old_file_and_does_not_stop_the_start(self):
         self.legacy.write_text("Owner rules\n", encoding="utf-8")
-        with patch.object(server.shutil, "copy2", side_effect=OSError(28, "No space left on device")):
+        with patch.object(
+            server.shutil, "copy2", side_effect=OSError(28, "No space left on device")
+        ):
             self.assertFalse(self.run_quiet(server.migrate_agents_file))
         self.assertEqual(self.legacy.read_text(encoding="utf-8"), "Owner rules\n")
         self.assertFalse(self.agents.exists())
@@ -135,11 +142,17 @@ class AgentsHome(unittest.TestCase):
 
     def test_the_editor_reads_and_writes_the_app_folder(self):
         server.write_agents_file("Edited in the editor")
-        self.assertEqual(self.agents.read_text(encoding="utf-8"), "Edited in the editor\n")
+        self.assertEqual(
+            self.agents.read_text(encoding="utf-8"), "Edited in the editor\n"
+        )
         self.assertEqual(server.read_agents_file(), "Edited in the editor\n")
         self.assertFalse(os.path.lexists(self.legacy))
-        self.assertEqual(self.link.read_text(encoding="utf-8") if self.link.exists() else "Edited in the editor\n",
-                         "Edited in the editor\n")
+        self.assertEqual(
+            self.link.read_text(encoding="utf-8")
+            if self.link.exists()
+            else "Edited in the editor\n",
+            "Edited in the editor\n",
+        )
 
 
 class AgentsFileWritableWithoutCard(unittest.TestCase):
@@ -155,14 +168,27 @@ class AgentsFileWritableWithoutCard(unittest.TestCase):
         """The sandboxPolicy the worker sends with a message, in a temporary task root."""
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        final = Path(folder.name) / "tasks" / self.TASK_ID / "turns" / "t1" / "final.json"
+        final = (
+            Path(folder.name) / "tasks" / self.TASK_ID / "turns" / "t1" / "final.json"
+        )
         final.parent.mkdir(parents=True)
         proc = type("Process", (), {"stdin": io.StringIO(), "poll": lambda _: None})()
         options = {**server.DEFAULT_OPTIONS, "codex_sandbox": sandbox}
-        with patch.object(server, "task_root", return_value=Path(folder.name) / "tasks"), \
-                patch.object(server, "task_mode_settings", return_value={
-                    "sandbox": sandbox, "approval_policy": "on-request", "approvals_reviewer": "user"}):
-            session = server.create_approval_session(self.TASK_ID, proc, "Edit my rules", final, None, {}, options)
+        with (
+            patch.object(server, "task_root", return_value=Path(folder.name) / "tasks"),
+            patch.object(
+                server,
+                "task_mode_settings",
+                return_value={
+                    "sandbox": sandbox,
+                    "approval_policy": "on-request",
+                    "approvals_reviewer": "user",
+                },
+            ),
+        ):
+            session = server.create_approval_session(
+                self.TASK_ID, proc, "Edit my rules", final, None, {}, options
+            )
         return session.turn_params["sandboxPolicy"]
 
     def covered(self, path, roots):
@@ -184,7 +210,11 @@ class AgentsFileWritableWithoutCard(unittest.TestCase):
     def test_the_root_is_the_app_folder_only_not_the_app_data(self):
         """The app's private files stay out: /addon_config is a separate mount from /data and /run."""
         roots = self.turn_roots("workspace-write")["writableRoots"]
-        for private in (server.WORKER_TOKEN_PATH, server.OPTIONS_PATH, Path("/run/s6/container_environment")):
+        for private in (
+            server.WORKER_TOKEN_PATH,
+            server.OPTIONS_PATH,
+            Path("/run/s6/container_environment"),
+        ):
             self.assertFalse(self.covered(private, roots), private)
 
 
@@ -197,7 +227,12 @@ class AgentsHomeDefaults(unittest.TestCase):
         self.assertEqual(server.CODEX_AGENTS_LINK, server.CODEX_HOME / "AGENTS.md")
 
     def test_config_yaml_maps_addon_config_apart_from_the_home_assistant_config(self):
-        mounts = {m["type"]: m for m in yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))["map"]}
+        mounts = {
+            m["type"]: m
+            for m in yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))[
+                "map"
+            ]
+        }
         self.assertEqual(mounts["addon_config"]["path"], "/addon_config")
         self.assertFalse(mounts["addon_config"]["read_only"])
         self.assertEqual(mounts["homeassistant_config"]["path"], "/homeassistant")
@@ -213,6 +248,7 @@ class AgentsHomeDefaults(unittest.TestCase):
                 calls.append(name)
                 if stop:
                     raise StopHere
+
             return call
 
         # The steps this test does not replace (the chat move, the old sign-in images) run in a temporary copy
@@ -225,10 +261,16 @@ class AgentsHomeDefaults(unittest.TestCase):
             patch.object(server.protected_policy, "policy_problem", return_value=""),
             patch.object(server, "make_worker_undumpable", return_value=True),
             patch.object(server, "migrate_agents_file", side_effect=record("migrate")),
-            patch.object(server, "write_starter_agents_file", side_effect=record("starter")),
+            patch.object(
+                server, "write_starter_agents_file", side_effect=record("starter")
+            ),
             patch.object(server, "ensure_runtime_files", side_effect=record("ensure")),
             patch.object(server, "link_agents_file", side_effect=record("link")),
-            patch.object(server, "write_full_access_requirements_at_start", side_effect=record("done", stop=True)),
+            patch.object(
+                server,
+                "write_full_access_requirements_at_start",
+                side_effect=record("done", stop=True),
+            ),
             self.assertRaises(StopHere),
         ):
             server.main()

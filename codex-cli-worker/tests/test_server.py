@@ -1,21 +1,21 @@
 """Session ids, Codex arguments and model choice, diagnostics, usage parsing, and task failure and cancellation."""
+
 from __future__ import annotations
 
 import importlib.util
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from threading import Event, Thread
 import types
 import unittest
-from pathlib import Path
-from threading import Event, Thread
 from unittest.mock import patch
 
 from app_folders import isolated_app_folders
 from app_server_fixture import StubAppServer
-
 
 SERVER_PATH = Path(__file__).resolve().parents[1] / "server.py"
 if importlib.util.find_spec("websocket") is None:
@@ -69,7 +69,9 @@ class SessionIdParsingTests(unittest.TestCase):
         task_id = "resumed-task"
         events: list[dict[str, object]] = []
 
-        proc = StubAppServer(returned_thread or self.THREAD_ID, final_payload, turn_error=turn_error)
+        proc = StubAppServer(
+            returned_thread or self.THREAD_ID, final_payload, turn_error=turn_error
+        )
 
         saved_task = server.tasks.get(task_id)
         server.tasks[task_id] = {
@@ -114,7 +116,10 @@ class SessionIdParsingTests(unittest.TestCase):
                     patch.object(
                         server,
                         "fire_ha_event",
-                        side_effect=lambda _event, data: (events.append(data) or True, ""),
+                        side_effect=lambda _event, data: (
+                            events.append(data) or True,
+                            "",
+                        ),
                     ),
                     patch.object(server, "notify"),
                     patch.object(server, "refresh_usage_status_async"),
@@ -138,7 +143,14 @@ class SessionIdParsingTests(unittest.TestCase):
 
     def test_checks_during_the_turn_add_no_review_note(self) -> None:
         """A check Codex ran during the turn, whatever its result, adds nothing to the answer's text."""
-        for check_status in ("disabled", "captured", "passed", "failed", "issues", "unavailable"):
+        for check_status in (
+            "disabled",
+            "captured",
+            "passed",
+            "failed",
+            "issues",
+            "unavailable",
+        ):
             with self.subTest(check_status=check_status):
                 real_begin = server.verification.begin
 
@@ -147,16 +159,24 @@ class SessionIdParsingTests(unittest.TestCase):
                     real_begin(task_id)
                     server.update_task(task_id, verification=[{"status": check_status}])
 
-                with patch.object(server.verification, "begin", side_effect=begin_with_check):
+                with patch.object(
+                    server.verification, "begin", side_effect=begin_with_check
+                ):
                     task, _ = self.run_resumed_task(
-                        final_payload={"status": "completed", "summary": "Done", "details": "Original details"},
+                        final_payload={
+                            "status": "completed",
+                            "summary": "Done",
+                            "details": "Original details",
+                        },
                     )
                 self.assertEqual(task["status"], "completed")
                 self.assertEqual(task["details"], "Original details")
 
     def test_resume_rejects_a_different_thread(self) -> None:
         """A resumed task fails, and keeps its own session id, when Codex answers from another conversation."""
-        task, events = self.run_resumed_task(returned_thread=self.OTHER_ID, final_payload=None)
+        task, events = self.run_resumed_task(
+            returned_thread=self.OTHER_ID, final_payload=None
+        )
         self.assertEqual(task["status"], "failed")
         self.assertIn("Codex resumed a different conversation", task["details"])
         self.assertEqual(task["session_id"], self.THREAD_ID)
@@ -165,7 +185,12 @@ class SessionIdParsingTests(unittest.TestCase):
     def test_resume_preserves_the_requested_thread(self) -> None:
         """A resumed task keeps the session id it was resumed with."""
         task, events = self.run_resumed_task(
-            final_payload={"status": "completed", "summary": "resumed", "question": "", "details": ""},
+            final_payload={
+                "status": "completed",
+                "summary": "resumed",
+                "question": "",
+                "details": "",
+            },
         )
         self.assertEqual(task["session_id"], self.THREAD_ID)
         self.assertEqual(events[-1]["session_id"], self.THREAD_ID)
@@ -191,19 +216,37 @@ class SessionIdParsingTests(unittest.TestCase):
 
     def test_failed_exchange_names_the_reason_in_the_task_error(self) -> None:
         """A task that ends as failed names the reason in its error; any other outcome leaves the error empty."""
-        answer = {"status": "completed", "summary": "Edited the automation", "question": "", "details": ""}
+        answer = {
+            "status": "completed",
+            "summary": "Edited the automation",
+            "question": "",
+            "details": "",
+        }
         cases = [
-            ({**answer, "status": "failed", "summary": "The entity does not exist"}, None, "failed", "The entity does not exist"),
+            (
+                {**answer, "status": "failed", "summary": "The entity does not exist"},
+                None,
+                "failed",
+                "The entity does not exist",
+            ),
             (answer, "Model connection lost", "failed", "Model connection lost"),
             (None, None, "failed", "Codex finished without a final answer."),
             (answer, None, "completed", ""),
-            ({**answer, "status": "needs_input", "question": "Which light?"}, None, "waiting_for_input", ""),
+            (
+                {**answer, "status": "needs_input", "question": "Which light?"},
+                None,
+                "waiting_for_input",
+                "",
+            ),
         ]
         for final_payload, turn_error, status, error in cases:
             with self.subTest(status=status, error=error):
-                task, _events = self.run_resumed_task(final_payload=final_payload, turn_error=turn_error)
+                task, _events = self.run_resumed_task(
+                    final_payload=final_payload, turn_error=turn_error
+                )
                 self.assertEqual(task["status"], status)
                 self.assertEqual(task["error"], error)
+
 
 class CodexBinaryTests(unittest.TestCase):
     """The fixed path of the Codex executable, and its place on the command line."""
@@ -223,7 +266,9 @@ class CodexBinaryTests(unittest.TestCase):
 
     def test_app_server_uses_fixed_binary(self) -> None:
         """The Codex command line starts with the fixed path /usr/local/bin/codex and the app-server subcommand."""
-        self.assertEqual(server.build_app_server_args()[:2], ["/usr/local/bin/codex", "app-server"])
+        self.assertEqual(
+            server.build_app_server_args()[:2], ["/usr/local/bin/codex", "app-server"]
+        )
 
 
 class RuntimeDiagnosticsTests(unittest.TestCase):
@@ -263,7 +308,11 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
     def test_workspace_sandbox_uses_no_proc_fallback(self) -> None:
         """A workspace sandbox is ready if only the fresh /proc probe fails; the message names the no-proc fallback."""
         with (
-            patch.object(server, "read_options", return_value={"codex_sandbox": "workspace-write"}),
+            patch.object(
+                server,
+                "read_options",
+                return_value={"codex_sandbox": "workspace-write"},
+            ),
             patch.object(server.shutil, "which", return_value="/usr/bin/bwrap"),
             patch.object(
                 server,
@@ -286,7 +335,11 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
     def test_danger_full_access_is_refused_without_a_probe(self) -> None:
         """danger-full-access is never ready: the protected policy refuses it before Bubblewrap is even looked at."""
         with (
-            patch.object(server, "read_options", return_value={"codex_sandbox": "danger-full-access"}),
+            patch.object(
+                server,
+                "read_options",
+                return_value={"codex_sandbox": "danger-full-access"},
+            ),
             patch.object(server.shutil, "which", return_value="/usr/bin/bwrap"),
             patch.object(server, "_bubblewrap_probe") as probe,
         ):
@@ -378,9 +431,13 @@ class UsageParsingTests(unittest.TestCase):
         self.assertTrue(parsed["weekly_reset_at"])
         self.assertEqual(parsed["five_hour_reset"], "17:22")
         # The percentage is still the last one on the line, the freshest the CLI printed.
-        self.assertEqual((parsed["five_hour_percent"], parsed["weekly_percent"]), ("94", "97"))
+        self.assertEqual(
+            (parsed["five_hour_percent"], parsed["weekly_percent"]), ("94", "97")
+        )
         # The same for the 5-hour limit when it is the panel's last line.
-        parsed = server._parse_usage_output("5h limit: [###] 95% left (resets 17:22) › Ask Codex · 5h 95% left")
+        parsed = server._parse_usage_output(
+            "5h limit: [###] 95% left (resets 17:22) › Ask Codex · 5h 95% left"
+        )
         self.assertEqual(parsed["five_hour_reset"], "17:22")
 
     def test_status_panel_names_the_model_the_cli_picks(self) -> None:
@@ -391,7 +448,9 @@ class UsageParsingTests(unittest.TestCase):
         # The panel shows the display name; a model the worker offers is returned as its id.
         self.assertEqual(server._parse_status_model(STATUS_PANEL), "gpt-6.1-sol")
         # The limits are still read from the same panel.
-        self.assertEqual(server._parse_usage_output(STATUS_PANEL)["weekly_percent"], "70")
+        self.assertEqual(
+            server._parse_usage_output(STATUS_PANEL)["weekly_percent"], "70"
+        )
         lines = {
             "Model:           gpt-6-luna\n": "gpt-6-luna",
             # A model the worker does not offer keeps the name the CLI gives it.
@@ -429,7 +488,9 @@ class UsageProcessCleanupTests(unittest.TestCase):
             ),
             patch.object(server, "active_task_id", return_value=None),
             patch.object(server, "codex_binary_path", return_value=server.CODEX_BINARY),
-            patch.object(server, "codex_login_status", return_value={"status_ok": True}),
+            patch.object(
+                server, "codex_login_status", return_value={"status_ok": True}
+            ),
             patch.object(server, "codex_env", return_value={}),
             patch.object(server.os, "close"),
             patch.object(server.os, "write"),
@@ -467,8 +528,12 @@ class UsageProcessCleanupTests(unittest.TestCase):
             self.fetch_usage(return_value="5h limit: 10% left  weekly limit: 20% left")
             self.assertEqual(server.default_model(options), "gpt-6-luna")
             # A model named in the add-on options is not left to the CLI.
-            self.assertEqual(server.default_model({"codex_model": "gpt-6-sol"}), "gpt-6-sol")
-            self.assertEqual(server.default_model({"codex_model": "gpt-5.5"}), "gpt-5.6-sol")
+            self.assertEqual(
+                server.default_model({"codex_model": "gpt-6-sol"}), "gpt-6-sol"
+            )
+            self.assertEqual(
+                server.default_model({"codex_model": "gpt-5.5"}), "gpt-5.6-sol"
+            )
 
     def test_a_change_of_account_forgets_the_model_the_cli_picked(self) -> None:
         """Signing out forgets the remembered model, and a usage check that was running meanwhile does not restore it."""
@@ -479,9 +544,15 @@ class UsageProcessCleanupTests(unittest.TestCase):
             self.assertEqual(server.default_model(options), "gpt-6-luna")
             with (
                 patch.object(server, "active_task_id", return_value=None),
-                patch.object(server.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")),
+                patch.object(
+                    server.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0, "", ""),
+                ),
                 patch.object(server, "codex_env", return_value={}),
-                patch.object(server, "codex_login_status", return_value={"status_ok": False}),
+                patch.object(
+                    server, "codex_login_status", return_value={"status_ok": False}
+                ),
                 patch.object(server, "dismiss_persistent_notification"),
                 patch.object(server, "notify"),
                 patch.object(server, "refresh_usage_status_async"),
@@ -497,7 +568,9 @@ class UsageProcessCleanupTests(unittest.TestCase):
             self.fetch_usage(side_effect=sign_out_during_the_check)
             self.assertEqual(server.default_model(options), server.CLI_DEFAULT_MODEL)
             # The next check, with the new account, is remembered again.
-            self.fetch_usage(return_value=STATUS_PANEL.replace("GPT-6.1-Sol", "GPT-6-Astra"))
+            self.fetch_usage(
+                return_value=STATUS_PANEL.replace("GPT-6.1-Sol", "GPT-6-Astra")
+            )
             self.assertEqual(server.default_model(options), "gpt-6-astra")
 
     def test_status_probe_answers_both_folder_trust_prompts(self) -> None:
@@ -510,7 +583,9 @@ class UsageProcessCleanupTests(unittest.TestCase):
             with self.subTest(version=version):
                 reads = iter([prompt, "", "5h limit: 10% used  weekly limit: 20% used"])
                 with (
-                    patch.object(server, "_read_pty", side_effect=lambda *_args: next(reads, "")),
+                    patch.object(
+                        server, "_read_pty", side_effect=lambda *_args: next(reads, "")
+                    ),
                     patch.object(server.os, "write") as write,
                     patch.object(server.time, "sleep"),
                 ):
@@ -526,7 +601,12 @@ class ModelSelectionTests(unittest.TestCase):
     def session_for_model(self, model, session_id=None):
         """Bind an app-server exchange to the given model set in the add-on options."""
         return server.create_approval_session(
-            "task", StubAppServer(session_id or "thread"), "Prompt", Path("final"), session_id, {},
+            "task",
+            StubAppServer(session_id or "thread"),
+            "Prompt",
+            Path("final"),
+            session_id,
+            {},
             {"codex_model": model, "codex_sandbox": "workspace-write"},
         )
 
@@ -552,7 +632,9 @@ class ModelSelectionTests(unittest.TestCase):
         with patch.object(server, "core_address", server.CoreAddress()):
             self.assertIsNone(server.codex_ha_url(config["options"]))
         translations = server.yaml.safe_load(
-            (SERVER_PATH.parent / "translations" / "en.yaml").read_text(encoding="utf-8")
+            (SERVER_PATH.parent / "translations" / "en.yaml").read_text(
+                encoding="utf-8"
+            )
         )
         self.assertIn("HA_URL", translations["configuration"]["ha_url"]["description"])
 
@@ -585,30 +667,52 @@ class ModelSelectionTests(unittest.TestCase):
 
     def test_every_value_of_the_old_option_list_still_resolves(self) -> None:
         """Each value the dropdown once offered keeps working as the free-text option."""
-        old_list = ("default", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna",
-                    "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5")
+        old_list = (
+            "default",
+            "gpt-6-astra",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+        )
         for model in old_list:
             with self.subTest(model=model):
                 execution = server.resolve_chat_settings(
-                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": model})
-                expected = "default" if model == "default" else server.current_model(model)
+                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": model}
+                )
+                expected = (
+                    "default" if model == "default" else server.current_model(model)
+                )
                 self.assertEqual(execution["model"], expected)
 
     def test_free_text_model_is_trimmed_and_passed_through(self) -> None:
         """A model name the app does not know is passed to Codex as typed, minus stray spaces; empty means default."""
         execution = server.resolve_chat_settings(
-            server.DEFAULT_CHAT_SETTINGS, {"codex_model": "  gpt-9-new  "})
+            server.DEFAULT_CHAT_SETTINGS, {"codex_model": "  gpt-9-new  "}
+        )
         self.assertEqual(execution["model"], "gpt-9-new")
         self.assertEqual(execution["reasoning_effort"], "medium")
         for empty in ("", "   ", None):
             with self.subTest(empty=empty):
                 execution = server.resolve_chat_settings(
-                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": empty})
+                    server.DEFAULT_CHAT_SETTINGS, {"codex_model": empty}
+                )
                 self.assertEqual(execution["model"], "default")
 
     def test_explicit_model_is_passed_to_codex(self) -> None:
         """A model named in the options is passed to app-server on new and resumed sessions."""
-        for model in ("gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-terra"):
+        for model in (
+            "gpt-6-astra",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-terra",
+        ):
             for session_id in (None, "019fc242-910a-7c92-a17d-54c014e19fc4"):
                 with self.subTest(model=model, session_id=session_id):
                     session = self.session_for_model(model, session_id)
@@ -629,12 +733,16 @@ class RuntimeConfigTests(unittest.TestCase):
                 patch.object(server, "CODEX_HOME", root / "codex-home"),
                 patch.object(server, "DATA_ROOT", root),
                 patch.object(server, "OLD_AUTH_QR_DIR", root / "auth-qr"),
-                patch.object(server, "CODEX_CONFIG_PATH", root / "codex-home" / "config.toml"),
+                patch.object(
+                    server, "CODEX_CONFIG_PATH", root / "codex-home" / "config.toml"
+                ),
                 patch.object(server, "task_root", return_value=root / "tasks"),
                 patch.object(server, "api_token", return_value="configured"),
             ):
                 server.ensure_runtime_files()
-                config = (root / "codex-home" / "config.toml").read_text(encoding="utf-8")
+                config = (root / "codex-home" / "config.toml").read_text(
+                    encoding="utf-8"
+                )
 
         self.assertIn("check_for_update_on_startup = false", config)
 
@@ -664,8 +772,12 @@ class HealthRouteTests(unittest.TestCase):
                 "codex_login_status",
                 return_value={"status_ok": True, "message": "logged in"},
             ),
-            patch.object(server, "auth_status_payload", return_value={"status": "authenticated"}),
-            patch.object(server, "task_root", return_value=Path("/homeassistant/codex_tasks")),
+            patch.object(
+                server, "auth_status_payload", return_value={"status": "authenticated"}
+            ),
+            patch.object(
+                server, "task_root", return_value=Path("/homeassistant/codex_tasks")
+            ),
         ):
             response = server.app.test_client().get(
                 "/health",
@@ -700,8 +812,14 @@ class TaskLaunchFailureTests(unittest.TestCase):
             task_dir = Path(temp_dir) / "task"
             with (
                 patch.object(server.store, "task_dir", return_value=task_dir),
-                patch.object(server, "update_task", side_effect=lambda _task_id, **values: updates.append(values)),
-                patch.object(server, "read_options", return_value={"task_timeout_seconds": 30}),
+                patch.object(
+                    server,
+                    "update_task",
+                    side_effect=lambda _task_id, **values: updates.append(values),
+                ),
+                patch.object(
+                    server, "read_options", return_value={"task_timeout_seconds": 30}
+                ),
                 patch.object(
                     server,
                     "sandbox_readiness",
@@ -731,6 +849,7 @@ class TaskLaunchFailureTests(unittest.TestCase):
 
     def test_stdin_write_and_flush_failures_are_cleaned_up(self) -> None:
         """A broken pipe on the first request fails the task and reaps the process."""
+
         class FakeProcess(StubAppServer):
             """An app-server stand-in whose stdin breaks on write or flush and which records how it was stopped."""
 
@@ -758,7 +877,10 @@ class TaskLaunchFailureTests(unittest.TestCase):
 
         session_id = "019fc242-910a-7c92-a17d-54c014e19fc4"
         for fail_at in ("write", "flush"):
-            with self.subTest(fail_at=fail_at), tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                self.subTest(fail_at=fail_at),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 task_id = f"task-{fail_at}"
                 task_dir = Path(temp_dir) / task_id
                 proc = FakeProcess(fail_at)
@@ -798,7 +920,10 @@ class TaskLaunchFailureTests(unittest.TestCase):
                     patch.object(
                         server,
                         "fire_ha_event",
-                        side_effect=lambda _event, data: (events.append(data) or True, ""),
+                        side_effect=lambda _event, data: (
+                            events.append(data) or True,
+                            "",
+                        ),
                     ),
                     patch.object(server, "notify"),
                     patch.object(server, "refresh_usage_status_async"),
@@ -838,6 +963,7 @@ class BackgroundStartFailureTests(unittest.TestCase):
     @staticmethod
     def capture_event(events: list[dict[str, object]]):
         """Return a stand-in for fire_ha_event that adds each event's data to the given list."""
+
         def _capture(_event_type: str, data: dict[str, object]) -> tuple[bool, str]:
             """Keep the event data and report the event as sent."""
             events.append(data)
@@ -851,11 +977,19 @@ class BackgroundStartFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             with (
-                patch.object(server.store, "task_dir", side_effect=lambda task_id: root / task_id),
+                patch.object(
+                    server.store, "task_dir", side_effect=lambda task_id: root / task_id
+                ),
                 patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
-                patch.object(server.threading.Thread, "start", side_effect=RuntimeError("thread unavailable")),
-                patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
+                patch.object(
+                    server.threading.Thread,
+                    "start",
+                    side_effect=RuntimeError("thread unavailable"),
+                ),
+                patch.object(
+                    server, "fire_ha_event", side_effect=self.capture_event(events)
+                ),
                 patch.object(server, "notify"),
                 patch.object(server, "refresh_usage_status_async"),
             ):
@@ -891,12 +1025,20 @@ class BackgroundStartFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             with (
-                patch.object(server.store, "task_dir", side_effect=lambda value: root / value),
+                patch.object(
+                    server.store, "task_dir", side_effect=lambda value: root / value
+                ),
                 patch.object(server, "session_available", return_value=True),
                 patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
-                patch.object(server.threading.Thread, "start", side_effect=RuntimeError("thread unavailable")),
-                patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
+                patch.object(
+                    server.threading.Thread,
+                    "start",
+                    side_effect=RuntimeError("thread unavailable"),
+                ),
+                patch.object(
+                    server, "fire_ha_event", side_effect=self.capture_event(events)
+                ),
                 patch.object(server, "notify"),
                 patch.object(server, "refresh_usage_status_async"),
             ):
@@ -947,6 +1089,7 @@ class TaskCancellationTests(unittest.TestCase):
     @staticmethod
     def capture_event(events: list[dict[str, object]]):
         """Return a stand-in for fire_ha_event that adds each event's data to the given list."""
+
         def _capture(_event_type: str, data: dict[str, object]) -> tuple[bool, str]:
             """Keep the event data and report the event as sent."""
             events.append(data)
@@ -962,10 +1105,14 @@ class TaskCancellationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(
+                    server.store, "task_dir", return_value=Path(temp_dir) / task_id
+                ),
                 patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
-                patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
+                patch.object(
+                    server, "fire_ha_event", side_effect=self.capture_event(events)
+                ),
                 patch.object(server, "notify"),
                 patch.object(server, "refresh_usage_status_async"),
                 patch.object(server.subprocess, "Popen") as popen,
@@ -995,17 +1142,24 @@ class TaskCancellationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(
+                    server.store, "task_dir", return_value=Path(temp_dir) / task_id
+                ),
                 patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "page_message", return_value="prompt"),
                 patch.object(
                     server,
                     "read_options",
-                    return_value={"codex_sandbox": "workspace-write", "task_timeout_seconds": 30},
+                    return_value={
+                        "codex_sandbox": "workspace-write",
+                        "task_timeout_seconds": 30,
+                    },
                 ),
                 patch.object(server, "write_task_log"),
-                patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
+                patch.object(
+                    server, "fire_ha_event", side_effect=self.capture_event(events)
+                ),
                 patch.object(server, "notify"),
                 patch.object(server, "refresh_usage_status_async"),
                 patch.object(server.subprocess, "Popen") as popen,
@@ -1025,17 +1179,27 @@ class TaskCancellationTests(unittest.TestCase):
                         json={"prompt": "must remain blocked"},
                     )
                     overlap_statuses.append(overlap.status_code)
-                    return {"required": True, "ready": False, "message": "preflight failed"}
+                    return {
+                        "required": True,
+                        "ready": False,
+                        "message": "preflight failed",
+                    }
 
-                with patch.object(server, "sandbox_readiness", side_effect=cancel_during_preflight):
-                    thread = server.start_background_task(task_id, "cancel during preflight")
+                with patch.object(
+                    server, "sandbox_readiness", side_effect=cancel_during_preflight
+                ):
+                    thread = server.start_background_task(
+                        task_id, "cancel during preflight"
+                    )
                     thread.join(timeout=5)
 
         self.assertFalse(thread.is_alive())
         self.assertEqual(cancel_statuses, [200])
         self.assertEqual(overlap_statuses, [409])
         self.assertEqual(server.tasks[task_id]["status"], "cancelled")
-        self.assertEqual(server.tasks[task_id]["summary"], server.CANCELLED_TASK_SUMMARY)
+        self.assertEqual(
+            server.tasks[task_id]["summary"], server.CANCELLED_TASK_SUMMARY
+        )
         self.assertIsNone(server.active_task_id())
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["status"], "cancelled")
@@ -1064,7 +1228,9 @@ class TaskCancellationTests(unittest.TestCase):
         proc = FakeProcess()
         with tempfile.TemporaryDirectory() as temp_dir:
             with (
-                patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id),
+                patch.object(
+                    server.store, "task_dir", return_value=Path(temp_dir) / task_id
+                ),
                 patch.object(server.store, "save_index"),
                 patch.object(server, "api_token", return_value="test-token"),
                 patch.object(server, "page_message", return_value="prompt"),
@@ -1084,7 +1250,9 @@ class TaskCancellationTests(unittest.TestCase):
                 ),
                 patch.object(server, "write_task_log"),
                 patch.object(server.subprocess, "Popen", return_value=proc),
-                patch.object(server, "fire_ha_event", side_effect=self.capture_event(events)),
+                patch.object(
+                    server, "fire_ha_event", side_effect=self.capture_event(events)
+                ),
                 patch.object(server, "notify"),
                 patch.object(server, "refresh_usage_status_async"),
             ):
@@ -1092,12 +1260,21 @@ class TaskCancellationTests(unittest.TestCase):
                 thread = server.start_background_task(task_id, "cancel while running")
                 self.assertTrue(proc.started.wait(5))
                 cancelled = []
-                cancel_thread = Thread(target=lambda: cancelled.append(
-                    server.app.test_client().post(f"/tasks/{task_id}/cancel", headers=headers).status_code))
+                cancel_thread = Thread(
+                    target=lambda: cancelled.append(
+                        server.app.test_client()
+                        .post(f"/tasks/{task_id}/cancel", headers=headers)
+                        .status_code
+                    )
+                )
                 cancel_thread.start()
                 try:
                     self.assertTrue(proc.reaping.wait(5))
-                    overlap = server.app.test_client().post("/tasks", headers=headers, json={"prompt": "must remain blocked"})
+                    overlap = server.app.test_client().post(
+                        "/tasks",
+                        headers=headers,
+                        json={"prompt": "must remain blocked"},
+                    )
                     self.assertEqual(overlap.status_code, 409)
                 finally:
                     proc.release_exit.set()
@@ -1108,7 +1285,9 @@ class TaskCancellationTests(unittest.TestCase):
         self.assertEqual(cancelled, [200])
         # The worker stops an app-server turn by interrupting it and waiting for the process to exit;
         # it terminates only when that wait runs out (reap_approval_process).
-        self.assertIn("turn/interrupt", [message.get("method") for message in proc.requests])
+        self.assertIn(
+            "turn/interrupt", [message.get("method") for message in proc.requests]
+        )
         self.assertTrue(proc.reaping.is_set())
         self.assertIsNotNone(proc.poll())
         self.assertNotIn(task_id, server.running_processes)
@@ -1119,6 +1298,7 @@ class TaskCancellationTests(unittest.TestCase):
 
     def test_terminate_and_reap_escalates_after_timeout(self) -> None:
         """A process that ignores terminate is killed and reaped, and its exit is confirmed."""
+
         class StubbornProcess:
             """A process that ignores terminate and exits only when killed."""
 
@@ -1164,6 +1344,7 @@ class TaskCancellationTests(unittest.TestCase):
 
     def test_unkillable_process_remains_registered_and_blocks_new_tasks(self) -> None:
         """A process that survives terminate and kill stays registered, so its task stays active and blocks new ones."""
+
         class UnkillableProcess:
             """A process that keeps running through terminate and kill."""
 
@@ -1218,7 +1399,10 @@ class WorkerNoteTests(unittest.TestCase):
 
     def test_notes_keep_file_names_as_inline_code(self) -> None:
         """Paths in the worker's notes are Markdown inline code, so the chat shows their underscores and asterisks."""
-        self.assertEqual(server.code_span("custom_components/foo/__init__.py"), "`custom_components/foo/__init__.py`")
+        self.assertEqual(
+            server.code_span("custom_components/foo/__init__.py"),
+            "`custom_components/foo/__init__.py`",
+        )
         # A backtick in a name gets a longer fence, and padding when it is at an end.
         self.assertEqual(server.code_span("odd`name.yaml"), "``odd`name.yaml``")
         self.assertEqual(server.code_span("`quoted`"), "`` `quoted` ``")
@@ -1227,10 +1411,19 @@ class WorkerNoteTests(unittest.TestCase):
             "No copy of the previous version was saved for: `__pycache__/a.yaml`, `b.yaml`. "
             "Use a Home Assistant backup to restore such a file.",
         )
-        self.assertIn(", and 2 more", server.unsaved_note([f"file_{n}.yaml" for n in range(12)]))
+        self.assertIn(
+            ", and 2 more", server.unsaved_note([f"file_{n}.yaml" for n in range(12)])
+        )
         # A message from the configuration check names no file and is left as it is.
         self.assertEqual(
-            server.validation_details(["packages/__init__.yaml: bad", "Home Assistant configuration check failed: x"], {}, []),
+            server.validation_details(
+                [
+                    "packages/__init__.yaml: bad",
+                    "Home Assistant configuration check failed: x",
+                ],
+                {},
+                [],
+            ),
             "Validation errors: `packages/__init__.yaml`: bad; Home Assistant configuration check failed: x",
         )
 

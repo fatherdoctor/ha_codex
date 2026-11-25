@@ -12,20 +12,26 @@ Both facts are read, never guessed:
 
 A read that fails gives no banner: the page says nothing rather than something that may be false.
 """
+
 from __future__ import annotations
 
-import json
-import re
-import time
 from contextlib import closing
 from dataclasses import dataclass
+import json
 from pathlib import Path
-
-import requests
-import websocket
+import re
+import time
 
 from core_address import get_json
-from integration_sync import DISCOVERY_SERVICE, OPTIONS_PATH, TARGET_DIR, install_option_on, manifest_version
+from integration_sync import (
+    DISCOVERY_SERVICE,
+    OPTIONS_PATH,
+    TARGET_DIR,
+    install_option_on,
+    manifest_version,
+)
+import requests
+import websocket
 
 CORE_WEBSOCKET_URL = "ws://supervisor/core/websocket"
 SELF_INFO_URL = "http://supervisor/addons/self/info"
@@ -49,7 +55,10 @@ class UpdateStatus:
 
     def as_json(self) -> dict[str, str | None]:
         """Return the reply fields of the /update-status route."""
-        return {"restart_version": self.restart_version, "update_version": self.update_version}
+        return {
+            "restart_version": self.restart_version,
+            "update_version": self.update_version,
+        }
 
 
 def clean_version(value: object) -> str | None:
@@ -67,7 +76,10 @@ def loaded_integration_version(token: str) -> str | None:
         raise ReadFailed("no Supervisor token")
     deadline = time.monotonic() + WEBSOCKET_SECONDS
     try:
-        with closing(websocket.create_connection(CORE_WEBSOCKET_URL, timeout=WEBSOCKET_SECONDS)) as ws:
+        with closing(
+            websocket.create_connection(CORE_WEBSOCKET_URL, timeout=WEBSOCKET_SECONDS)
+        ) as ws:
+
             def receive() -> dict:
                 ws.settimeout(max(0.1, deadline - time.monotonic()))
                 raw = ws.recv()
@@ -83,7 +95,11 @@ def loaded_integration_version(token: str) -> str | None:
             ws.send(json.dumps({"type": "auth", "access_token": token}))
             if receive().get("type") != "auth_ok":
                 raise ReadFailed("authentication refused")
-            ws.send(json.dumps({"id": 1, "type": "manifest/get", "integration": DISCOVERY_SERVICE}))
+            ws.send(
+                json.dumps(
+                    {"id": 1, "type": "manifest/get", "integration": DISCOVERY_SERVICE}
+                )
+            )
             reply = receive()
     except (OSError, ValueError, websocket.WebSocketException) as exc:
         raise ReadFailed(str(exc)) from exc
@@ -106,7 +122,9 @@ def manifest_reply_version(reply: dict) -> str | None:
     return version
 
 
-def restart_version(token: str, target: Path = TARGET_DIR, options: Path = OPTIONS_PATH) -> str | None:
+def restart_version(
+    token: str, target: Path = TARGET_DIR, options: Path = OPTIONS_PATH
+) -> str | None:
     """Return the integration version on disk when Home Assistant runs another one (or none), else None.
 
     With the option Install the Codex integration off, the owner installs the integration and the app reads nothing

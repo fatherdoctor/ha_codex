@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+from pathlib import Path
 import posixpath
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico")
@@ -41,7 +41,9 @@ ALLOWED = (
 
 def tracked_files(root: Path) -> list[str]:
     """Every file git tracks under root, as a path from root with forward slashes."""
-    result = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True)
+    result = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True
+    )
     return [name for name in result.stdout.decode("utf-8").split("\0") if name]
 
 
@@ -75,7 +77,11 @@ def unreferenced_images(root: Path = ROOT) -> list[str]:
     """The tracked images that no other tracked text file names and ALLOWED does not cover, sorted."""
     files = tracked_files(root)
     texts = read_text_files(root, files)
-    images = [name for name in files if name.lower().endswith(IMAGE_SUFFIXES) and not is_allowed(name)]
+    images = [
+        name
+        for name in files
+        if name.lower().endswith(IMAGE_SUFFIXES) and not is_allowed(name)
+    ]
     unused = []
     for image in images:
         used = any(
@@ -91,7 +97,12 @@ def unreferenced_images(root: Path = ROOT) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--root", type=Path, default=ROOT, help="the repository to check (default: this one)")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=ROOT,
+        help="the repository to check (default: this one)",
+    )
     args = parser.parse_args(argv)
     try:
         unused = unreferenced_images(args.root)

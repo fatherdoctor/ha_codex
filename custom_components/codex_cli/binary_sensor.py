@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -23,10 +26,17 @@ async def async_setup_entry(
 ) -> None:
     """Set up Codex CLI binary sensors."""
     coordinator: CodexCliCoordinator = entry.runtime_data.coordinator
-    async_add_entities([CodexRunningBinarySensor(coordinator, entry), CodexSignedInBinarySensor(coordinator, entry)])
+    async_add_entities(
+        [
+            CodexRunningBinarySensor(coordinator, entry),
+            CodexSignedInBinarySensor(coordinator, entry),
+        ]
+    )
 
 
-class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity):
+class CodexRunningBinarySensor(
+    CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity
+):
     """Show whether a Codex task is running."""
 
     _attr_has_entity_name = True
@@ -52,7 +62,9 @@ class CodexRunningBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySen
         return bool((self.coordinator.data or {}).get("active_task_id"))
 
 
-class CodexSignedInBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity):
+class CodexSignedInBinarySensor(
+    CoordinatorEntity[CodexCliCoordinator], BinarySensorEntity
+):
     """Show whether Codex is signed in to ChatGPT, so an expired sign-in can drive an alert or a card."""
 
     _attr_has_entity_name = True
@@ -63,12 +75,17 @@ class CodexSignedInBinarySensor(CoordinatorEntity[CodexCliCoordinator], BinarySe
         """Set the unique ID and attach the sensor to the Codex device of the config entry."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_signed_in"
-        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}, "entry_type": DeviceEntryType.SERVICE}
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "entry_type": DeviceEntryType.SERVICE,
+        }
 
     @property
     def is_on(self) -> bool:
         """Return true when the worker reports a working Codex sign-in."""
-        return bool(((self.coordinator.data or {}).get("codex_login") or {}).get("status_ok"))
+        return bool(
+            ((self.coordinator.data or {}).get("codex_login") or {}).get("status_ok")
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, object]:

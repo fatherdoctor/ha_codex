@@ -68,16 +68,23 @@ class CodexWorkdirTests(unittest.TestCase):
         (self.media / ".agents").symlink_to(elsewhere, target_is_directory=True)
         with patch("builtins.print") as printed:
             server.ensure_codex_workdir()
-        self.assertEqual(list(elsewhere.iterdir()), [], "nothing is made through the link")
+        self.assertEqual(
+            list(elsewhere.iterdir()), [], "nothing is made through the link"
+        )
         self.assertEqual(server.codex_workdir(), str(self.config))
         printed.assert_called_once()
         line = printed.call_args.args[0]
         self.assertIn(f"has a link in its path, at {self.media / '.agents'};", line)
         # Codex cannot build its sandbox past a link named .agents: the line says so, and how to end it.
-        self.assertIn(f"Until the link {self.media / '.agents'} is removed, Codex cannot run commands", line)
+        self.assertIn(
+            f"Until the link {self.media / '.agents'} is removed, Codex cannot run commands",
+            line,
+        )
         self.assertIn("Read only still works.", line)
 
-    def test_a_link_at_the_last_part_is_named_and_leaves_the_sandbox_alone(self) -> None:
+    def test_a_link_at_the_last_part_is_named_and_leaves_the_sandbox_alone(
+        self,
+    ) -> None:
         """A link at /media/.agents/codex is named in the line; it does not stop the sandbox, so no warning."""
         elsewhere = self.root / "elsewhere"
         elsewhere.mkdir()
@@ -92,11 +99,16 @@ class CodexWorkdirTests(unittest.TestCase):
 
     def test_a_link_to_nothing_higher_in_the_path_is_named_too(self) -> None:
         """A broken link at /media/.agents still stops the sandbox, so the line warns about it as well."""
-        (self.media / ".agents").symlink_to(self.root / "missing", target_is_directory=True)
+        (self.media / ".agents").symlink_to(
+            self.root / "missing", target_is_directory=True
+        )
         with patch("builtins.print") as printed:
             server.ensure_codex_workdir()
         self.assertEqual(server.codex_workdir(), str(self.config))
-        self.assertIn(f"Until the link {self.media / '.agents'} is removed", printed.call_args.args[0])
+        self.assertIn(
+            f"Until the link {self.media / '.agents'} is removed",
+            printed.call_args.args[0],
+        )
 
     def test_a_link_higher_in_the_path_to_a_folder_with_codex_is_refused(self) -> None:
         """A link at /media/.agents to a folder that already holds codex/ is refused, not only a link at codex."""
@@ -121,7 +133,12 @@ class CodexWorkdirTests(unittest.TestCase):
     def test_the_folder_is_inside_a_writable_root(self) -> None:
         """Writing in the working folder needs no approval: it is under one of the task's writable roots."""
         self.assertEqual(SHIPPED_WORKDIR, Path("/media/.agents/codex"))
-        self.assertTrue(any(SHIPPED_WORKDIR.is_relative_to(root) for root in server.TASK_WRITABLE_ROOTS))
+        self.assertTrue(
+            any(
+                SHIPPED_WORKDIR.is_relative_to(root)
+                for root in server.TASK_WRITABLE_ROOTS
+            )
+        )
 
     def test_media_and_the_working_folders_parent_are_writable_roots(self) -> None:
         """The owner's ruling of 2026-11-22: /media is writable, as it is for the Claude add-on.
@@ -133,11 +150,18 @@ class CodexWorkdirTests(unittest.TestCase):
         self.assertIn("/media", server.TASK_WRITABLE_ROOTS)
         self.assertIn(str(SHIPPED_WORKDIR.parent), server.TASK_WRITABLE_ROOTS)
         self.assertEqual(str(SHIPPED_WORKDIR.parent), "/media/.agents")
-        self.assertFalse(any(Path("/data/github/token").is_relative_to(root) for root in server.TASK_WRITABLE_ROOTS))
+        self.assertFalse(
+            any(
+                Path("/data/github/token").is_relative_to(root)
+                for root in server.TASK_WRITABLE_ROOTS
+            )
+        )
 
     def test_the_app_maps_media_read_write(self) -> None:
         """Without the map, the working folder would be in the container and lost at each update."""
-        config = server.yaml.safe_load(Path(server.__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        config = server.yaml.safe_load(
+            Path(server.__file__).with_name("config.yaml").read_text(encoding="utf-8")
+        )
         maps = [entry for entry in config["map"] if entry.get("type") == "media"]
         self.assertEqual(maps, [{"type": "media", "read_only": False}])
 
@@ -151,15 +175,25 @@ class CodexWorkdirTests(unittest.TestCase):
         self.assertIn(f"Home Assistant configuration: {server.CONFIG_ROOT}\n", rules)
         self.assertNotIn("@@WORKDIR@@", rules)
 
-    def test_a_secret_named_relative_to_the_working_folder_is_still_a_secret(self) -> None:
+    def test_a_secret_named_relative_to_the_working_folder_is_still_a_secret(
+        self,
+    ) -> None:
         """A diff of secrets.yaml is blanked whether Codex names it from CONFIG_ROOT or from its working folder."""
         self.workdir.mkdir(parents=True)
         config = self.config.as_posix()
-        for path in (f"{config}/secrets.yaml", "secrets.yaml", "../../../config/secrets.yaml",
-                     "../codex/../../../config/.storage/auth"):
+        for path in (
+            f"{config}/secrets.yaml",
+            "secrets.yaml",
+            "../../../config/secrets.yaml",
+            "../codex/../../../config/.storage/auth",
+        ):
             with self.subTest(path=path):
                 self.assertTrue(server.secret_config_path(path))
-        for path in (f"{self.workdir}/notes.md", "notes.md", f"{config}/automations.yaml"):
+        for path in (
+            f"{self.workdir}/notes.md",
+            "notes.md",
+            f"{config}/automations.yaml",
+        ):
             with self.subTest(path=path):
                 self.assertFalse(server.secret_config_path(path))
 
@@ -169,14 +203,20 @@ class RemoteControlWorkdirTests(unittest.TestCase):
 
     def test_the_app_gives_the_relay_the_working_folder(self) -> None:
         """The one line in server.py that makes remote control start in the working folder, not the CONFIG_ROOT default."""
-        self.assertIs(server.remote_control_supervisor.workdir_factory, server.codex_workdir)
+        self.assertIs(
+            server.remote_control_supervisor.workdir_factory, server.codex_workdir
+        )
 
     def test_the_relay_gets_the_pages_writable_folders(self) -> None:
         """A relay thread names no writable folders, so the process's config must; else /homeassistant asks each time."""
         with patch.object(server, "read_options", return_value={}):
             args = server.relay_tool_args()
         values = [args[i + 1] for i, flag in enumerate(args[:-1]) if flag == "--config"]
-        roots = [v.split("=", 1)[1] for v in values if v.startswith("sandbox_workspace_write.writable_roots=")]
+        roots = [
+            v.split("=", 1)[1]
+            for v in values
+            if v.startswith("sandbox_workspace_write.writable_roots=")
+        ]
         self.assertEqual(len(roots), 1)
         self.assertEqual(json.loads(roots[0]), list(server.TASK_WRITABLE_ROOTS))
         self.assertLessEqual({"/homeassistant", "/share"}, set(json.loads(roots[0])))

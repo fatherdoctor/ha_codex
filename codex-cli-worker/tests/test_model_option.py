@@ -1,7 +1,7 @@
 """The optional custom model still accepts names outside the configuration drop-down."""
 
-import unittest
 from pathlib import Path
+import unittest
 
 import yaml
 
@@ -23,7 +23,10 @@ class ModelOptionSchemaTests(unittest.TestCase):
 
     def test_translation_says_how_to_find_model_names(self):
         translations = yaml.safe_load(
-            (CONFIG_PATH.parent / "translations" / "en.yaml").read_text(encoding="utf-8"))
+            (CONFIG_PATH.parent / "translations" / "en.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
         description = translations["configuration"]["codex_model"]["description"]
         self.assertIn("free text", description)
         self.assertIn("model list", description)

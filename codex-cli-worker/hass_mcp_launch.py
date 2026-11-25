@@ -7,11 +7,12 @@ environment (a chat), sets the three variables hass-mcp reads, and replaces itse
 It never prints the token. With no token it exits with a message, and Codex reports the server as
 failed to start; the chat itself still starts.
 """
+
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
+import sys
 
 KEY_ENV = "HA_MCP_CAPABILITY"
 TOKEN_FILE = Path("/run/s6/container_environment/SUPERVISOR_TOKEN")
@@ -41,8 +42,11 @@ def server_env(environ: dict[str, str], value: str) -> dict[str, str]:
 def main() -> int:
     value = token(dict(os.environ))
     if not value:
-        print("Home Assistant MCP: no Supervisor token is available, so the server does not start.",
-              file=sys.stderr, flush=True)
+        print(
+            "Home Assistant MCP: no Supervisor token is available, so the server does not start.",
+            file=sys.stderr,
+            flush=True,
+        )
         return 1
     os.execve(SERVER, [SERVER], server_env(dict(os.environ), value))
     return 1  # Not reached: execve replaces this process or raises.
