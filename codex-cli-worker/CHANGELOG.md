@@ -80,6 +80,10 @@
 - The GitHub card explains its repository count: Codex reaches only the repositories that the GitHub App is installed
   on. A new **Add repositories** link under the list opens the App's Configure page on GitHub, where you add more. The
   link comes from GitHub's answer for the installation and shows only for an App sign-in, not for a token.
+- Integration clean-up, with no change in behavior. Each Codex action now has its own function at the top level of
+  the integration, and one table lists every action with its data schema. The fallback for Home Assistant versions
+  that had no action responses is removed, because the oldest supported version has them. Imports are in Home
+  Assistant's order, and a `raise` of an HTTP error with no arguments has no empty parentheses.
 
 ## 0.5.1 (unreleased)
 
