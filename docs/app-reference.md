@@ -377,8 +377,7 @@ The app creates the folder at start when it is missing and never moves, empties 
 may write without a request is `/homeassistant`, `/share`, `/media` (with `/media/.agents`), `/addon_config` (the app's own
 folder, where its `AGENTS.md` is), the exchange's backup folder and the chat's files folder. Other apps keep their
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
-does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
-`AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
+does not stop a write there in `workspace-write`; your own `AGENTS.md` can tell Codex to ask first. When the folder cannot be created, when `/media` is missing, or when any part of the path is
 a link, Codex works from `/homeassistant` as before and the app's log says why, naming the link. A link at `/media/.agents`
 itself does more: Codex keeps that folder read-only and cannot do so through a link, so it refuses to build its
 sandbox, and every command in Ask for approval and Approve for me fails until you remove the link. Read only still
@@ -749,18 +748,31 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 The app web UI includes an editor for the app's `AGENTS.md` (in its own `addon_config` folder, not in `/homeassistant`) under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
+**Built-in instructions (0.6).** The app sends its own instructions with every chat: on the page they end the
+developer instructions of each new thread (and the rules that `exchange_info` returns), and in remote control they end
+the developer instructions of the remote Codex process. The text is `builtin_instructions.md` in the app's source: the
+folders and how `/config` maps to `/homeassistant`, the Home Assistant tools, how to read logs, the secrets rules and
+the Git and GitHub rules. It ships in the image, so an update of the app updates it, and nobody edits it. Settings >
+Workspace instructions shows it read-only, in muted italic text on a tinted ground, above the `AGENTS.md` editor; the
+editor never saves it into your file. Your `AGENTS.md` takes priority: the built-in text says so in its first line,
+it comes last in the developer instructions, and Codex reads your file after them, as its global instructions. The
+app does not copy your file into the developer instructions.
+
 **Starter instructions.** On its first start, the app writes a short starter `AGENTS.md` in the app's own folder when the home has
-none. The text is `starter_agents.md` in the app's source. It tells Codex what `/homeassistant` is and gives seven general
-rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
-of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
-defaults (secrets, protected places, backups) and says that they are defaults the owner can change, not locks in
-the app. Two more sections tell Codex how to keep a memory across chats (one fact per file in `/config/memory/`,
-with an index `/config/memory/MEMORY.md` it reads at the start of each chat, and never a secret) and say
-that the Codex device holds this app's own entities. The app never replaces a file that is already there,
-a link included. It writes the starter once: when you delete the file, it stays deleted while the app keeps
-its data, and an update of an app that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
-command check and the approval cards work the same with or without them. To get the starter on an older install,
-copy the text from `starter_agents.md` into the editor.
+none. The text is `starter_agents.md` in the app's source. It says that its rules take priority over the built-in
+instructions, tells Codex how to keep a memory across chats (one fact per file in `/homeassistant/.codex/memory/`, with
+an index `MEMORY.md` it reads at the start of each chat, never a secret, never committed), and tells Codex to rename or
+delete a chat only with the app's tools or on the chat page, never by changing files under `/data`. The app never
+replaces a file that is already there, a link included. It writes the starter once: when you delete the file, it
+stays deleted while the app keeps its data, and an update of an app that has started before writes nothing. The rules
+are instructions to Codex and not a safeguard; the sandbox, the command check and the approval cards work the same
+with or without them. To get the starter on an older install, copy the text from `starter_agents.md` into the editor.
+
+**From 0.5 to 0.6.** The secrets and Git rules of the 0.5 starter now ship with the app as built-in instructions. An
+`AGENTS.md` from 0.5 keeps working: you may remove its Secrets and Git and GitHub lines, and paste the Memory section
+of the new `starter_agents.md`. The 0.5 starter's other rules (change the home only on the owner's word, keep the old
+version, check before a restart, the safeguard defaults) are not in the new starter; keep them in your file if you
+want them.
 
 **Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/homeassistant`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/homeassistant` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex then worked in that folder and would have read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/homeassistant` for you to merge or delete. The folder is part of the app's backup like its other data.
 

@@ -52,7 +52,7 @@ GitHub sign-in: it asks the app to run git for it. The steps are in the [Documen
 
 ## Setup
 
-Put rules for your house in **Settings** > **Workspace instructions** (the app's `AGENTS.md`). Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
+Put rules for your house in **Settings** > **Workspace instructions** (the app's `AGENTS.md`). Codex uses its defaults and your workspace instructions; the app bundles no house rules. It also sends its built-in instructions (folders, tools, logs, secrets and GitHub; shown above the editor, updated with the app), and your workspace instructions take priority over them. A new install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 The other options are on the app's **Configuration** tab. More: [Documentation](DOCS.md).
 
 ## Using ChatGPT for Home Assistant

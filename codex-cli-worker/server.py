@@ -152,6 +152,9 @@ CODEX_AGENTS_LINK = CODEX_HOME / "AGENTS.md"
 AGENTS_MOVE_BACKUP = DATA_ROOT / "agents_before_move.md"
 # The starter text for a home with no AGENTS.md; it ships beside this file in the app image.
 STARTER_AGENTS_PATH = Path(__file__).resolve().parent / "starter_agents.md"
+# The built-in layer of the instructions: the app's own rules (paths, tools, logs, secrets, git), sent with every
+# chat's developer instructions, so an update of the app updates them. The owner's AGENTS.md is the other layer.
+BUILTIN_INSTRUCTIONS = (Path(__file__).resolve().parent / "builtin_instructions.md").read_text(encoding="utf-8").strip()
 TASK_STATE_FILE = DATA_ROOT / "task_index.json"
 MESSAGE_QUEUE_FILE = DATA_ROOT / "message_queue.json"
 HA_DOCS_ROOT = DATA_ROOT / "ha-docs"
@@ -5057,8 +5060,8 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
 
 
 def remote_control_instructions(options: dict[str, Any]) -> str:
-    """Offer token-free observational reads and keep native command decisions intact."""
-    return (
+    """Offer token-free observational reads, keep native command decisions intact, and end with the built-in layer."""
+    return with_builtin_instructions(
         f"You are running in the Home Assistant add-on. {old_config_note()} "
         f"Put notes, scratch files and drafts in {CODEX_WORKDIR}, not in {CONFIG_ROOT}. "
         + (f"Owner workspace instructions: {AGENTS_PATH}. " if AGENTS_PATH.is_file() else "")
@@ -5147,12 +5150,23 @@ def old_config_note() -> str:
     )
 
 
+def with_builtin_instructions(text: str) -> str:
+    """Put BUILTIN_INSTRUCTIONS at the end of a chat's developer instructions.
+
+    Codex sends the owner's AGENTS.md as user instructions after the developer instructions. The built-in text
+    gives the owner's file priority in its first line, and coming last it sits directly before that file, so
+    "anything here" means the built-in text only, not the page's tool rules above it.
+    """
+    return text.rstrip("\n") + "\n\n" + BUILTIN_INSTRUCTIONS + "\n"
+
+
 def build_page_instructions():
-    """The page rules; the scheduling paragraph is in them only while scheduled runs are switched on."""
+    """The page rules and the built-in layer; the scheduling paragraph is in them only while scheduled runs are on."""
     paragraph = SCHEDULING_PARAGRAPH + "\n\n" if scheduling.SCHEDULED_RUNS else ""
     text = (_PAGE_INSTRUCTIONS_TEMPLATE.replace("@@SCHEDULING_PARAGRAPH@@", paragraph)
             .replace("@@WORKDIR@@", str(CODEX_WORKDIR)))
-    return text.replace("@@OLD_CONFIG_NOTE@@", old_config_note()).replace("@@CONFIG_ROOT@@", CONFIG_ROOT.as_posix())
+    text = text.replace("@@OLD_CONFIG_NOTE@@", old_config_note()).replace("@@CONFIG_ROOT@@", CONFIG_ROOT.as_posix())
+    return with_builtin_instructions(text)
 
 
 PAGE_INSTRUCTIONS = build_page_instructions()  # for callers that read it at import; the send paths call the function
@@ -7524,6 +7538,8 @@ def get_agents() -> Response:
             "path": str(AGENTS_PATH),
             "exists": AGENTS_PATH.exists(),
             "content": content,
+            # Shown read-only above the editor; the editor never saves it into AGENTS.md.
+            "builtin": BUILTIN_INSTRUCTIONS,
         }
     )
 

@@ -2,6 +2,16 @@
 
 ## 0.6.0 (unreleased)
 
+- **Built-in instructions.** The app now sends its own instructions with every chat, on the page and in remote
+  control: the folders, the Home Assistant tools, how to read logs, and the rules for secrets and for Git and GitHub.
+  An update of the app updates them. **Settings** > **Workspace instructions** shows them read-only above the
+  `AGENTS.md` editor. Your `AGENTS.md` takes priority over them.
+- **A shorter starter `AGENTS.md`.** A new install gets only the memory rules (in `/homeassistant/.codex/memory/`)
+  and a rule to rename or delete chats only with the app's tools or page. An existing `AGENTS.md` is never changed.
+  If yours came from an earlier starter, you may remove its Secrets and Git and GitHub lines, which now ship with the
+  app, and paste the Memory section from `starter_agents.md`. The earlier starter's other rules are gone from the new
+  one; keep them in your file if you want them.
+
 - **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
   the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
   selects the code instead, so you can copy it by hand.

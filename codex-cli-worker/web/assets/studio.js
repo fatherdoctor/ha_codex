@@ -245,6 +245,7 @@ $("workspace-open").onclick = async () => {
   $("workspace-result").textContent = "Loading…";
   try {
     const data = await api("agents");
+    $("builtin-text").textContent = data.builtin || "";
     $("agents").value = data.content || "";
     $("agents").disabled = $("save-agents").disabled = false;
     $("workspace-result").textContent = "";
