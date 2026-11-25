@@ -1,10 +1,8 @@
 """Remote control: the machine name, the command and its environment, the supervisor and the routes."""
-
 from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
 import queue
 import subprocess
 import sys
@@ -13,11 +11,13 @@ import threading
 import time
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import remote_control as rc
+from remote_unpaused import setUpModule, tearDownModule  # noqa: F401  (Remote Control is paused)
 
 
 class FakeStdout:
@@ -106,37 +106,16 @@ class CommandTests(unittest.TestCase):
     """The command line and the environment the process gets."""
 
     def test_name_is_an_argument_never_part_of_the_script(self) -> None:
-        cmd = rc.build_command(
-            "/usr/local/bin/codex", "Home Assistant", "remote-control", "--no-daemon"
-        )
+        cmd = rc.build_command("/usr/local/bin/codex", "Home Assistant", "remote-control", "--no-daemon")
         self.assertEqual(cmd[:2], [rc.RELAY_LAUNCHER, rc.RELAY_BWRAP])
         self.assertEqual(cmd[cmd.index("--hostname") + 1], "Home Assistant")
-        self.assertEqual(
-            cmd[-3:], ["/usr/local/bin/codex", "remote-control", "--no-daemon"]
-        )
+        self.assertEqual(cmd[-3:], ["/usr/local/bin/codex", "remote-control", "--no-daemon"])
         self.assertNotIn("sh", cmd)
 
     def test_environment_keeps_core_pair_without_supervisor_credentials(self) -> None:
-        env = rc.remote_env(
-            {
-                "SUPERVISOR_TOKEN": "s",
-                "HASSIO_TOKEN": "h",
-                "HA_TOKEN": "t",
-                "HA_URL": "u",
-                "HA_DATA_SOCKET": "d",
-                "CODEX_HOME": "/data/codex-home",
-                "PATH": "/bin",
-            }
-        )
-        self.assertEqual(
-            env,
-            {
-                "HA_TOKEN": "t",
-                "HA_URL": "u",
-                "CODEX_HOME": "/data/codex-home",
-                "PATH": "/bin",
-            },
-        )
+        env = rc.remote_env({"SUPERVISOR_TOKEN": "s", "HASSIO_TOKEN": "h", "HA_TOKEN": "t", "HA_URL": "u",
+                             "HA_DATA_SOCKET": "d", "CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
+        self.assertEqual(env, {"HA_TOKEN": "t", "HA_URL": "u", "CODEX_HOME": "/data/codex-home", "PATH": "/bin"})
 
 
 class RedactTests(unittest.TestCase):
@@ -145,10 +124,7 @@ class RedactTests(unittest.TestCase):
     def test_redact_keeps_the_pairing_code_only(self) -> None:
         token = "A" * 40
         self.assertEqual(rc.redact(f"token {token}\n"), "token [hidden]")
-        self.assertEqual(
-            rc.redact("Pairing code: ABCD-1234", keep="ABCD-1234"),
-            "Pairing code: ABCD-1234",
-        )
+        self.assertEqual(rc.redact("Pairing code: ABCD-1234", keep="ABCD-1234"), "Pairing code: ABCD-1234")
 
 
 class SupervisorTests(unittest.TestCase):
@@ -161,28 +137,23 @@ class SupervisorTests(unittest.TestCase):
         self.procs: list[FakeProc] = []
         self.commands: list[list[str]] = []
         self.envs: list[dict[str, str]] = []
+        self.cwds: list[str] = []
+        self.workdir = str(Path(self.tmp.name))
 
         def popen(cmd, **kwargs):
             self.commands.append(cmd)
             self.envs.append(kwargs["env"])
+            self.cwds.append(kwargs["cwd"])
             proc = FakeProc()
             self.procs.append(proc)
             return proc
 
         self.sup = rc.Supervisor(
-            codex_binary="/usr/local/bin/codex",
-            state_path=self.state,
-            env_factory=lambda: {
-                "HA_TOKEN": "secret",
-                "CODEX_HOME": "/data/codex-home",
-            },
-            name_factory=lambda: "Home Assistant",
-            popen=popen,
-            control_factory=FakeControl,
-        )
-        patcher = patch.multiple(
-            rc, BACKOFF_START=0.05, BACKOFF_CAP=0.1, STOP_GRACE=0.2
-        )
+            codex_binary="/usr/local/bin/codex", state_path=self.state,
+            env_factory=lambda: {"HA_TOKEN": "secret", "CODEX_HOME": "/data/codex-home"},
+            name_factory=lambda: "Home Assistant", popen=popen, control_factory=FakeControl,
+            workdir_factory=lambda: self.workdir)
+        patcher = patch.multiple(rc, BACKOFF_START=0.05, BACKOFF_CAP=0.1, STOP_GRACE=0.2)
         patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(self.sup.stop)
@@ -194,13 +165,7 @@ class SupervisorTests(unittest.TestCase):
 
     def test_start_needs_no_check_of_the_apps_own(self) -> None:
         """0.3.6: no gate marker, hook self-test or rule-load probe stands between Turn on and the process."""
-        for name in (
-            "gate_problem",
-            "hook_problem",
-            "requirements_problem",
-            "exec_rules_self_test",
-            "ConfigWatch",
-        ):
+        for name in ("gate_problem", "hook_problem", "requirements_problem", "exec_rules_self_test", "ConfigWatch"):
             self.assertFalse(hasattr(rc, name), name)
         state = self.sup.start()
         self.assertTrue(self.sup.enabled())
@@ -208,6 +173,26 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(state["blocked_reason"], "")
         self.assertNotIn("config_findings", state)
         self.assertTrue(wait_for(lambda: self.procs))
+
+    def test_the_process_starts_in_the_working_folder(self) -> None:
+        """The remote Codex starts where the chat page's Codex works, not in /homeassistant."""
+        self.sup.start()
+        self.assertTrue(wait_for(lambda: self.procs))
+        self.assertEqual(self.cwds, [self.workdir])
+
+    def test_the_namespace_probe_runs_in_the_working_folder(self) -> None:
+        """The probe starts where the launch starts, so a missing /homeassistant cannot fail the probe alone."""
+        probe_cwds: list[str] = []
+
+        def run(cmd, **kwargs):
+            probe_cwds.append(kwargs["cwd"])
+            return types.SimpleNamespace(returncode=0)
+
+        self.sup.run = run
+        self.sup.start()
+        self.assertTrue(wait_for(lambda: self.procs))
+        self.assertEqual(probe_cwds, [self.workdir])
+        self.assertEqual(self.cwds, [self.workdir])
 
     def test_resume_runs_when_left_on(self) -> None:
         self.sup.save_enabled(True)
@@ -223,18 +208,11 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(self.envs[0]["HA_TOKEN"], "secret")
         proc = self.procs[0]
         proc.stdout.lines.put("Pairing code: ABCD-1234\n")
-        self.assertTrue(
-            wait_for(lambda: self.sup.snapshot()["pairing_code"] == "ABCD-1234")
-        )
+        self.assertTrue(wait_for(lambda: self.sup.snapshot()["pairing_code"] == "ABCD-1234"))
         snap = self.sup.snapshot()
         self.assertEqual(snap["state"], "pairing")
-        self.assertTrue(
-            snap["pairing_qr"].startswith("data:image/svg+xml;base64,")
-            or snap["pairing_qr"] == ""
-        )
-        proc.stdout.lines.put(
-            "This machine is available for remote control as Home Assistant.\n"
-        )
+        self.assertTrue(snap["pairing_qr"].startswith("data:image/svg+xml;base64,") or snap["pairing_qr"] == "")
+        proc.stdout.lines.put("This machine is available for remote control as Home Assistant.\n")
         self.assertTrue(wait_for(lambda: self.sup.snapshot()["state"] == "ready"))
         self.assertEqual(self.sup.snapshot()["machine_name"], "Home Assistant")
 
@@ -292,84 +270,44 @@ class RouteTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.client = server.app.test_client()
-        self.ingress = {
-            "headers": {"X-Ingress-Path": "/api/hassio_ingress/test"},
-            "environ_overrides": {"REMOTE_ADDR": server.INGRESS_PROXY_IP},
-        }
+        self.ingress = {"headers": {"X-Ingress-Path": "/api/hassio_ingress/test"},
+                        "environ_overrides": {"REMOTE_ADDR": server.INGRESS_PROXY_IP}}
         patcher = patch.object(server, "api_token", return_value="tok")
         patcher.start()
         self.addCleanup(patcher.stop)
-        admin = patch.object(
-            server, "ingress_admin", return_value=({"user_id": "fixture-admin"}, "")
-        )
+        admin = patch.object(server, "ingress_admin", return_value=({"user_id": "fixture-admin"}, ""))
         admin.start()
         self.addCleanup(admin.stop)
 
     def test_token_reads_state(self) -> None:
-        with (
-            patch.object(
-                server.remote_control_supervisor,
-                "snapshot",
-                return_value={"state": "off"},
-            ),
-            patch.object(server, "core_address", server.CoreAddress()),
-        ):
-            response = self.client.get(
-                "/remote-control", headers={"Authorization": "Bearer tok"}
-            )
+        with patch.object(server.remote_control_supervisor, "snapshot", return_value={"state": "off"}), patch.object(server, "core_address", server.CoreAddress()):
+            response = self.client.get("/remote-control", headers={"Authorization": "Bearer tok"})
         self.assertEqual(response.status_code, 200)
-        state = response.get_json()["remote_control"]
-        self.assertEqual(state["state"], "off")
-        self.assertIsNone(state["core_address"]["url"])
-        self.assertEqual(state["core_address"]["source"], "unavailable")
-        self.assertIn("no Core API token is needed", state["read_tools"])
-        self.assertNotIn("capability", json.dumps(state))
+        state = response.get_json()['remote_control']
+        self.assertEqual(state['state'], 'off')
+        self.assertIsNone(state['core_address']['url'])
+        self.assertEqual(state['core_address']['source'], 'unavailable')
+        self.assertIn('no Core API token is needed', state['read_tools'])
+        self.assertNotIn('capability', json.dumps(state))
 
     def test_token_cannot_turn_it_on(self) -> None:
         with patch.object(server.remote_control_supervisor, "start") as start:
-            response = self.client.post(
-                "/remote-control/start",
-                headers={"Authorization": "Bearer tok"},
-                json={},
-            )
+            response = self.client.post("/remote-control/start", headers={"Authorization": "Bearer tok"}, json={})
         self.assertEqual(response.status_code, 403)
         start.assert_not_called()
 
     def test_page_start_returns_the_state(self) -> None:
-        with patch.object(
-            server.remote_control_supervisor,
-            "start",
-            return_value={"state": "starting"},
-        ):
-            response = self.client.post(
-                "/remote-control/start", json={}, **self.ingress
-            )
+        with patch.object(server.remote_control_supervisor, "start", return_value={"state": "starting"}):
+            response = self.client.post("/remote-control/start", json={}, **self.ingress)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["remote_control"]["state"], "starting")
 
     def test_page_stop_and_unknown_action(self) -> None:
-        with patch.object(
-            server.remote_control_supervisor, "stop", return_value={"state": "off"}
-        ):
-            self.assertEqual(
-                self.client.post(
-                    "/remote-control/stop", json={}, **self.ingress
-                ).status_code,
-                200,
-            )
-        self.assertEqual(
-            self.client.post(
-                "/remote-control/reboot", json={}, **self.ingress
-            ).status_code,
-            404,
-        )
+        with patch.object(server.remote_control_supervisor, "stop", return_value={"state": "off"}):
+            self.assertEqual(self.client.post("/remote-control/stop", json={}, **self.ingress).status_code, 200)
+        self.assertEqual(self.client.post("/remote-control/reboot", json={}, **self.ingress).status_code, 404)
         # The config watch and its review action are gone (0.3.6).
-        self.assertEqual(
-            self.client.post(
-                "/remote-control/review", json={}, **self.ingress
-            ).status_code,
-            404,
-        )
+        self.assertEqual(self.client.post("/remote-control/review", json={}, **self.ingress).status_code, 404)
 
 
 if __name__ == "__main__":

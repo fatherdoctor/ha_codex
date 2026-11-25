@@ -15,7 +15,7 @@ const base = 'http://127.0.0.1:9137/preview/';
    await page.locator('#permission-button').click();
    assert.equal(await page.locator('[data-mode="full-access"]').isDisabled(),true,'off: the choice is disabled');
    assert.equal(await page.locator('[data-mode="full-access"] strong').evaluate(e=>getComputedStyle(e).fontWeight),'400','off: Full access is not bold');
-   await page.locator('[data-close="permissions-dialog"]').click();
+   await page.keyboard.press('Escape');
 
    await page.evaluate(()=>document.getElementById('settings-button').click());
    await page.locator('#settings').waitFor();
@@ -63,7 +63,7 @@ const base = 'http://127.0.0.1:9137/preview/';
    await page.locator('#full-access-toggle').click();
    await page.waitForFunction(()=>document.body.dataset.fullAccess==='off');
    await page.evaluate(()=>document.getElementById('settings').close());
-   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Default permissions','off: the chat shows Default');
+   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Ask for approval','off: the chat shows Ask for approval');
    assert.equal(await page.locator('#permission-button.full-access').count(),0,'off: no Full access marker');
    const sent = page.waitForRequest(request=>request.method()==='POST' && /\/(tasks|continue)$/.test(new URL(request.url()).pathname));
    await page.locator('#message').fill('Next message');
@@ -76,7 +76,7 @@ const base = 'http://127.0.0.1:9137/preview/';
    await page.locator('#full-access-confirm').click();
    await page.waitForFunction(()=>document.body.dataset.fullAccess==='on');
    await page.evaluate(()=>document.getElementById('settings').close());
-   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Default permissions','on again: the chat shows Default');
+   assert.equal(await page.locator('#permission-button').getAttribute('aria-label'),'Ask for approval','on again: the chat shows Ask for approval');
    assert.equal(await page.locator('#permission-button.full-access').count(),0,'on again: no Full access marker');
    const again = page.waitForRequest(request=>request.method()==='POST' && /\/(tasks|continue)$/.test(new URL(request.url()).pathname));
    await page.locator('#message').fill('One more message');
@@ -89,6 +89,6 @@ const base = 'http://127.0.0.1:9137/preview/';
    assert.deepEqual(errors,[]);
    await context.close();
   }
-  console.log('PASS: Full access warning, cancel, confirm, no banner, bold choice while on, chat choice and marker, turn off, a Full access chat falls back to Default and stays there when Full access is turned on again, desktop and mobile');
+  console.log('PASS: Full access warning, cancel, confirm, no banner, bold choice while on, chat choice and marker, turn off, a Full access chat falls back to Ask for approval and stays there when Full access is turned on again, desktop and mobile');
  } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exit(1);});

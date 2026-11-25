@@ -26,6 +26,8 @@ the version.
   Verification checks workflow, and CONTRIBUTING.md says how to run them by hand.
 - Run: only inside Home Assistant OS or Supervised, by a person; `python codex-cli-worker/tests/web_fixture.py`
   serves the chat page alone on port 9137 with temporary data, without Home Assistant or Codex.
+- Code checks: `python scripts/code_checks.py` - green ends `code_checks: ok (...)`, exit 0; the warning line it
+  prints is not a failure. `test_code_checks.py` runs it inside the suite.
 - Before a push: the full `pytest` run, or the worker-only run when 3.14 is not at hand (say which in the PR).
 
 ## Layout
@@ -37,8 +39,8 @@ the version.
 | `codex-cli-worker/web/` | the chat page (plain JavaScript and CSS, no build step) |
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
-| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback) |
-| `docs/` | `updates-and-rollback.md`, design notes under `design/` and `designs/` |
+| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback), `check_unreferenced_images.py`, `code_checks.py` (file size, globals by name) |
+| `docs/` | `app-reference.md`, `updates-and-rollback.md`, design notes under `design/` |
 | `ci/` | workflow files staged for the maintainer to copy into `.github/workflows/` |
 | `examples/`, `screenshots/` | the example script; the screenshots, which `screenshots/SCREENSHOTS.md` says how to retake |
 
@@ -54,8 +56,10 @@ the version.
 - A pull request follows `.github/pull_request_template.md` and stays a draft until it is ready for review.
 - Every pull request gets an independent adversarial review before it merges; each finding is fixed, or declined
   in writing with the reason.
-- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/config` states its
+- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/homeassistant` states its
   safety reasoning in the pull request and comes with tests that fail without it.
+- No directory restriction (a folder hidden, read-only or not writable in the sandbox) unless it has been checked
+  against what the Claude Code add-on allows today; the app aims at the same file access. Say the check in the PR.
 - Keep the pins: the base image by digest, the packaged Codex CLI by version and checksum, no self-update
   (`codex-cli-worker/tests/test_fork_pins.py` checks them). Moving a pin is its own pull request.
 - The app and the integration carry one version: `codex-cli-worker/config.yaml` and `manifest.json` change
@@ -67,6 +71,22 @@ the version.
   `screenshots/SCREENSHOTS.md`.
 - Tests and fixtures use invented data only: no real tokens, device codes, logs or Home Assistant configuration.
 - Keep the fork's differences from upstream small and separate, so an upstream release can still be merged.
+
+## Code standard
+
+Five rules for every change. `scripts/code_checks.py` checks rules 2 and 4; review checks the rest.
+
+1. Delete before you move: remove dead code and old paths first, then move or split what is left.
+2. No source file past 1,000 lines unless `SIZE_EXEMPT` in `scripts/code_checks.py` lists it with the reason. The
+   pull request that brings a listed file under the limit removes its entry.
+3. No special case bolted into a busy function: give the case its own function, or change the design that needs it.
+4. No helper that hands out any module global by name (`globals()[name]` in a `__getattr__` and the like): name the
+   global, or pass the object it needs.
+5. One model for each concept: one outcome type, one Home Assistant client, one transport, not a second copy beside
+   the first.
+
+The full strict review against these rules runs at milestones (each release, and before a large refactor), not on
+each pull request; tests that patch names inside `server.py` are counted as a warning, and the count should go down.
 
 ## Release
 
@@ -101,6 +121,6 @@ When one is:
 - `CONTRIBUTING.md` - test setup in full, manual checks, what a pull request holds.
 - `SECURITY.md` - reporting a vulnerability, and what the app can reach.
 - `docs/updates-and-rollback.md` - how a release reaches an install, the lab pass, rollback.
-- `codex-cli-worker/DOCS.md`, `VERIFICATION.md` and `SANDBOX_TESTING.md` (same folder) - options, the
-  verification tools and the sandbox checks.
+- `codex-cli-worker/DOCS.md` (the short guide), `docs/app-reference.md` (the detail behind it), and `VERIFICATION.md`
+  and `SANDBOX_TESTING.md` in `codex-cli-worker/` - options, the verification tools and the sandbox checks.
 - `codex-cli-worker/CHANGELOG.md` - what each version changed.

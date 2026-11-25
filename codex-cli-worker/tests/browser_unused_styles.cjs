@@ -3,6 +3,7 @@
 // Run with tests/web_fixture.py serving the page. Every name is synthetic.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 
 const REMOVED = ['eyebrow', 'footnote', 'suggestions', 'welcome-icon', 'text-button'];
 
@@ -36,6 +37,7 @@ async function removedInUse(page) {
       const context = await browser.newContext({viewport});
       const page = await context.newPage();
       const errors = []; page.on('pageerror', e => errors.push(e.message));
+      await unpauseRemote(page);
       await page.goto('http://127.0.0.1:9137/preview/');
       await page.locator('#greeting').waitFor({state: 'visible', timeout: 5000});
       assert.deepEqual(await removedInUse(page), [], `welcome screen at ${viewport.width} px`);
@@ -46,7 +48,7 @@ async function removedInUse(page) {
       await page.locator('#messages .message').first().waitFor({state: 'visible', timeout: 10000});
       assert.deepEqual(await removedInUse(page), [], `a chat at ${viewport.width} px`);
 
-      await page.evaluate(() => openSettingsAt("settings-commands"));
+      await page.evaluate(() => openSettingsAt("text-size-section"));
       await page.locator('#settings').waitFor({state: 'visible', timeout: 5000});
       assert.deepEqual(await removedInUse(page), [], `Settings at ${viewport.width} px`);
       await page.keyboard.press('Escape');

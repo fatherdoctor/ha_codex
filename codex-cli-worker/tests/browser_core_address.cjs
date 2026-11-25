@@ -1,6 +1,7 @@
 // Address source, first-run read guidance and stale-state clearing on the local fixture.
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
+const {unpauseRemote} = require('./remote_unpaused.cjs');
 (async()=>{
  const browser=await chromium.launch({headless:true});
  try {
@@ -16,7 +17,7 @@ const assert=require('node:assert/strict');
     await page.getByRole('button',{name:'Open settings',exact:true}).click();
     if(await page.locator('#accounts-section > h3 .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#accounts-section > h3 .settings-toggle').click();if(await page.locator('#app-pairing-section .settings-toggle').getAttribute('aria-expanded')!=='true')await page.locator('#app-pairing-section .settings-toggle').click();await page.getByRole('button',{name:'Manage remote connection',exact:true}).click();
    }
-   await page.goto('http://127.0.0.1:9137/preview/');await settings();
+   await unpauseRemote(page); await page.goto('http://127.0.0.1:9137/preview/');await settings();
    await page.waitForFunction(()=>document.querySelector('#remote-core-address').textContent.includes(':80'));
    assert.ok((await page.locator('#remote-core-address').textContent()).includes('discovery'));
    assert.ok((await page.locator('#remote-read-tools').textContent()).includes('no Core API token'));

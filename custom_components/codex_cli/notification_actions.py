@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Event, HomeAssistant, callback
 
 from .api import CodexCliApiClient, CodexCliApiError
+from .const import TASK_ID_PATTERN
 
 if TYPE_CHECKING:
     from .coordinator import CodexCliCoordinator
@@ -19,9 +20,7 @@ _LOGGER = logging.getLogger(__name__)
 # The companion apps fire this when a notification button is tapped.
 EVENT_NOTIFICATION_ACTION = "mobile_app_notification_action"
 # Written by the worker: the choice's position, the turn that asked, and the task. Keep the two in step.
-CHOICE_ACTION_RE = re.compile(
-    r"CODEX_CLI_CHOICE_(\d{1,2})_([0-9a-f]{32})_([A-Za-z0-9][A-Za-z0-9._-]{0,127})"
-)
+CHOICE_ACTION_RE = re.compile(r"CODEX_CLI_CHOICE_(\d{1,2})_([0-9a-f]{32})_(" + TASK_ID_PATTERN + ")")
 
 
 def parse_choice_action(action: Any) -> tuple[str, str, int] | None:
@@ -50,11 +49,7 @@ def async_listen_for_choices(
             return
         task_id, turn_id, choice = parsed
         # Only an administrator's tap answers Codex; a tap with no user is not taken either.
-        user = (
-            await hass.auth.async_get_user(event.context.user_id)
-            if event.context.user_id
-            else None
-        )
+        user = await hass.auth.async_get_user(event.context.user_id) if event.context.user_id else None
         if user is None or not user.is_active or not user.is_admin:
             _LOGGER.warning(
                 "Codex did not take an answer for task %s: only a Home Assistant administrator can answer Codex",
@@ -64,9 +59,7 @@ def async_listen_for_choices(
         try:
             await client.reply_choice(task_id, turn_id, choice)
         except CodexCliApiError as exc:
-            _LOGGER.warning(
-                "Codex did not take the answer picked for task %s: %s", task_id, exc
-            )
+            _LOGGER.warning("Codex did not take the answer picked for task %s: %s", task_id, exc)
             return
         await coordinator.async_request_refresh()
 

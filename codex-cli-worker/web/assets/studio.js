@@ -1,6 +1,6 @@
 "use strict";
 /** Production controls for the Quiet Studio layout. No sample account data. */
-const permissionNames = {default: "Default permissions", "auto-review": "Auto-review", "read-only": "Read only", "full-access": "Full access"};
+const permissionNames = {default: "Ask for approval", "auto-review": "Approve for me", "read-only": "Read only", "full-access": "Full access"};
 function updateStudio() {
   document.body.dataset.newChat = String(!state.id);
   const hour = new Date().getHours();
@@ -8,8 +8,7 @@ function updateStudio() {
   if (greeting) greeting.textContent = hour < 12 ? "Good morning" : hour < 18 ? "Nice to see you again" : "Good evening";
   $("phone-title").textContent = state.task?.title || "New chat";
   const permissionLabel = permissionNames[selectedPermissionMode()];
-  $("permission-label").textContent = innerWidth <= 700 && selectedPermissionMode() === 'default'
-    ? 'Default' : permissionLabel;
+  $("permission-label").textContent = permissionLabel;
   $("permission-button").setAttribute('aria-label', permissionLabel);
   $("permission-button").title = permissionLabel;
   $("permission-button").classList.toggle("full-access", selectedPermissionMode() === "full-access");
@@ -23,11 +22,30 @@ document.addEventListener("chat-view", updateStudio);
 for (const button of document.querySelectorAll("[data-close]"))
   button.onclick = () => $(button.dataset.close).close();
 $("phone-history").onclick = () => sidebar(true);
+/** Put the permissions pop-up directly above its button, inside the viewport, on a phone too. */
+function placePermissions() {
+  const popup = $("permissions-dialog");
+  const rect = $("permission-button").getBoundingClientRect();
+  const width = Math.min(300, innerWidth - 16);
+  popup.style.width = `${width}px`;
+  popup.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
+  popup.style.bottom = `${Math.max(8, innerHeight - rect.top + 8)}px`;
+}
 $("permission-button").onclick = () => {
+  if ($("permissions-dialog").open) {
+    $("permissions-dialog").close();
+    return;
+  }
   $("permission-result").textContent = "";
+  // One menu at a time: the model and reasoning picker closes (chat.js).
+  closePicker();
   updateStudio();
-  $("permissions-dialog").showModal();
+  placePermissions();
+  $("permissions-dialog").show();
 };
+window.addEventListener("resize", () => {
+  if ($("permissions-dialog").open) placePermissions();
+});
 for (const button of document.querySelectorAll("[data-mode]")) {
   button.onclick = async () => {
     if (state.settingsBusy) return;
@@ -71,6 +89,41 @@ document.addEventListener("pointerdown", event => {
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") $("plus-menu").hidden = true;
+  // The permissions pop-up is not modal, so the browser does not close it on Escape.
+  if (event.key === "Escape" && $("permissions-dialog").open) {
+    $("permissions-dialog").close();
+    $("permission-button").focus();
+  }
+});
+// The permissions pop-up closes on a press outside it (its button toggles it).
+document.addEventListener("pointerdown", event => {
+  const popup = $("permissions-dialog");
+  if (popup.open && !popup.contains(event.target) && !$("permission-button").contains(event.target)) popup.close();
+});
+
+/** Dialogs where the person typed or changed a field since they opened; an outside click must not throw that away. */
+const dirtyDialogs = new WeakSet();
+for (const type of ["input", "change"])
+  document.addEventListener(type, event => {
+    if (event.isTrusted) event.target.closest?.("dialog") && dirtyDialogs.add(event.target.closest("dialog"));
+  }, true);
+document.addEventListener("close", event => dirtyDialogs.delete(event.target), true);
+const dialogHasInput = dialog => dirtyDialogs.has(dialog);
+// A click or tap on the dim area behind a modal dialog closes it, like Escape. A dialog whose fields were
+// changed stays open, so nothing typed is lost. A press that starts inside the dialog (a text selection
+// that ends outside it) never closes it.
+let dialogPressStart = null;
+document.addEventListener("pointerdown", event => {
+  dialogPressStart = event.target;
+}, true);
+document.addEventListener("click", event => {
+  const dialog = event.target;
+  if (!(dialog instanceof HTMLDialogElement) || !dialog.open || dialog.id === "permissions-dialog") return;
+  if (dialogPressStart !== dialog) return;
+  const box = dialog.getBoundingClientRect();
+  const inside = event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom;
+  if (inside || dialogHasInput(dialog)) return;
+  if (dialog.dispatchEvent(new Event("cancel", {cancelable: true}))) dialog.close();
 });
 
 // Keep code/QR and the remote actions on a separate page, not inside Settings.
@@ -114,6 +167,8 @@ function renderStudioRemote(rc) {
   retryConnection.hidden = label.state !== "error" || !rc.enabled || !rc.available;
   // The Remote row at the foot of the side bar keeps to a word or two; its tooltip and the window's title say more.
   setFootRow("remote-status-row", ...remoteFootRow(rc, label));
+  // Only an error while the owner's switch is on counts as a sign-out; Off is the owner's choice.
+  noteAttention("remote", Boolean(rc.available && rc.enabled && label.state === "error"));
   $("remote-status-row").title = `Remote · ${label.text}`;
   document.body.dataset.connection = label.state;
   $("connection-title").textContent = `Remote connection · ${label.text}`;
@@ -155,6 +210,7 @@ function renderStudioRemote(rc) {
 document.addEventListener("remote-view", event => renderStudioRemote(event.detail));
 async function pollConnection() {
   clearTimeout(connectionTimer);
+  if (REMOTE_PAUSED) return;
   try { await loadRemoteControl(); $("connection-result").textContent = ""; }
   catch (error) {
     $("connection-result").textContent = error.message;
@@ -163,17 +219,23 @@ async function pollConnection() {
   connectionTimer = setTimeout(pollConnection, $("connection-dialog").open ? 5000 : 15000);
 }
 function openConnection() {
+  if (REMOTE_PAUSED) return;
   if ($("settings").open) $("settings").close();
   if (!$("connection-dialog").open) $("connection-dialog").showModal();
   pollConnection();
 }
 // The ChatGPT app pairing part of Accounts and connections in Settings opens the same window.
 $("remote-connection-open").onclick = openConnection;
+// Back returns to Settings, where the window was opened from; the X closes the window alone.
+$("connection-back").onclick = () => {
+  $("connection-dialog").close();
+  $("settings-button").click();
+};
 $("app-pairing-new").onclick = () => {
   openConnection();
   $("remote-control-pair").click();
 };
-$("connection-dialog").addEventListener("close", () => clearTimeout(remoteTimer));
+$("connection-dialog").addEventListener("close", () => polls.remote.stop());
 
 // Workspace rules are loaded only when Workspace instructions in Settings opens their dedicated editor.
 $("workspace-open").onclick = async () => {
@@ -197,7 +259,7 @@ $("save-agents").onclick = async () => {
   finally { $("save-agents").disabled = false; }
 };
 
-// A missing /config/AGENTS.md is a setup hint above the chat, shown until it is dismissed in this browser.
+// A missing AGENTS.md is a setup hint above the chat, shown until it is dismissed in this browser.
 const AGENTS_HINT_KEY = "codex-agents-hint-dismissed";
 function agentsHintDismissed() {
   try { return Boolean(localStorage.getItem(AGENTS_HINT_KEY)); } catch (_error) { return false; }

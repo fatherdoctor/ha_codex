@@ -7,7 +7,7 @@ Codex connects Home Assistant to the local Codex for Home Assistant app. It lets
 The Codex for Home Assistant app installs this integration for you. The steps with every detail are in the [repository README](../../README.md#installation).
 
 1. Add `https://github.com/fatherdoctor/ha_codex` as a Home Assistant app repository: **Settings** > **Apps** > **Install app** > menu > **Repositories**.
-2. Install and start the Codex for Home Assistant app. At start it copies this integration, in its own version, to `/config/custom_components/codex_cli`.
+2. Install and start the Codex for Home Assistant app. At start it copies this integration, in its own version, to `custom_components/codex_cli` in Home Assistant's configuration folder.
 3. Restart Home Assistant when the notification asks.
 4. Add **Discovered: Codex** under **Settings** > **Devices & services**.
 5. Open the app web UI and choose **Settings > Sign in** to sign in to Codex. See the [sign-in prerequisites](../../README.md#sign-in).
@@ -22,16 +22,18 @@ There is no worker URL or API token to enter.
 
 ## Entities
 
-- Auth status: Shows whether Codex CLI is signed in.
+- Auth status: Shows whether Codex CLI is signed in: Signed in, Saved sign-in does not work, or Not signed in. The sign-in code and its address are not attributes; the app page shows them, and `codex_cli.get_login_status` returns them to an administrator.
 - 5-hour limit: Shows the percentage remaining in the 5-hour window when Codex reports one. The entity remains for compatibility and is `unknown` with `reported: false` when that window is omitted.
 - 5-hour reset: Shows when the 5-hour window resets, if a reset time can be parsed.
 - Weekly limit: Shows the percentage remaining in the weekly window when Codex reports one.
 - Weekly reset: Shows when the weekly window resets, if a reset time can be parsed.
 - Active tasks: Shows the number of currently running Codex tasks.
-- Last task: Shows the latest known task status and related attributes. When that task failed, the `error` attribute gives the reason.
+- Last task: Shows the latest task's status (Queued, Running, Waiting for input, Completed, Failed or Cancelled), or unknown when there is no task. Its attributes are `task_id`, `turn_id`, `question`, `choices`, `updated_at`, `active_task_id` and, when that task failed, `error` with the reason.
 - Task running: Binary sensor that is on while a task is active.
 
 All entities are diagnostic entities on the Codex device.
+
+Every Home Assistant user can read an entity's state and attributes, a child's or guest's account too, and the recorder keeps them. So the entities carry no chat title or summary, no sign-in code and no piece of the Codex status screen. A waiting question and its choices are attributes of **Last task**, because an automation needs them to answer. The `codex_cli_task_result` event carries the full result for automations.
 
 Reset sensors are `unknown` when no reset time is available. Usage sensors keep the original reset description in `reset_text` and expose a parsed ISO datetime in `reset` when available.
 
@@ -45,7 +47,7 @@ Reset sensors are `unknown` when no reset time is available. Usage sensors keep 
 - `codex_cli.list_tasks`: Return all tasks or filter with `limit`, `offset`, `status`, `order`, and `summary`. Use `order: updated_desc` for recent activity and `summary: true` for compact entries.
 - `codex_cli.get_task`: Return one task by task ID, including its conversation in `turns`.
 - `codex_cli.cancel_task`: Cancel one task by task ID.
-- `codex_cli.reply_task`: Send a reply to a waiting task. Requires `task_id` and `reply`. With the optional `turn_id`, taken from the `codex_cli_task_result` event or the **Last task** sensor, the reply is refused once that question is no longer the one waiting.
+- `codex_cli.reply_task`: Send a reply to a waiting task. Requires `task_id` and `reply`. The actions that take a `task_id` refuse one that is not in the form the app makes (letters, digits, `.`, `_` and `-`). With the optional `turn_id`, taken from the `codex_cli_task_result` event or the **Last task** sensor, the reply is refused once that question is no longer the one waiting.
 
 All actions require a loaded integration entry; they return an error while it is setting up, retrying or unloading.
 
@@ -103,7 +105,7 @@ When a task completes, fails or needs input, the worker fires the event `codex_c
 
 A task returns a structured response with `status`, `summary`, `question`, `details` and `choices`. The first four are plain strings, and the Home Assistant consumer or notification service that receives them decides how they look. `choices` is a list of up to three short answers that Codex offers with a question; it is empty otherwise. The chat page formats Markdown in them (see [Formatted messages](../../codex-cli-worker/DOCS.md#formatted-messages)).
 
-To ask for a preferred style, add an instruction to `/config/AGENTS.md`, which you can edit from the app's web page. Codex treats it as guidance, not as a formatting guarantee. For Markdown-friendly output, add this:
+To ask for a preferred style, add an instruction to the app's `AGENTS.md`, which you can edit from the app's web page (**Settings** > **Workspace instructions**). Codex treats it as guidance, not as a formatting guarantee. For Markdown-friendly output, add this:
 
 ```md
 For the final structured response, use concise Markdown in summary, question,

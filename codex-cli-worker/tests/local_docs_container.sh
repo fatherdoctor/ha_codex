@@ -13,9 +13,9 @@ info = server.download_ha_docs(server.HA_DOCS_ROOT)
 print("Downloaded documentation commit", info["commit"])
 EOF
 
-mkdir -p /config /data/codex-home
+mkdir -p /homeassistant /data/codex-home
 export CODEX_HOME=/data/codex-home HOME=/data
-cd /config
+cd /homeassistant
 for mode in read-only workspace-write; do
     pages=$(codex sandbox --config "sandbox_mode=\"$mode\"" --config check_for_update_on_startup=false -- \
         /bin/sh -c 'ls /data/ha-docs/source/_integrations | wc -l')

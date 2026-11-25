@@ -15,26 +15,10 @@ WORKER = Path(__file__).resolve().parents[1]
 PROC_ERROR = b"bwrap: Can't mount proc on /proc: Operation not permitted\n"
 RECOGNIZED_ERROR = PROC_ERROR.replace(b"on /proc:", b"on /newroot/proc:")
 PROBE = [
-    "--as-pid-1",
-    "--new-session",
-    "--die-with-parent",
-    "--tmpfs",
-    "/",
-    "--ro-bind",
-    "/usr",
-    "/usr",
-    "--dev",
-    "/dev",
-    "--unshare-user",
-    "--unshare-pid",
-    "--unshare-ipc",
-    "--unshare-net",
-    "--proc",
-    "/proc",
-    "--cap-drop",
-    "ALL",
-    "--",
-    "/usr/bin/true",
+    "--as-pid-1", "--new-session", "--die-with-parent",
+    "--tmpfs", "/", "--ro-bind", "/usr", "/usr", "--dev", "/dev",
+    "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-net",
+    "--proc", "/proc", "--cap-drop", "ALL", "--", "/usr/bin/true",
 ]
 
 
@@ -66,103 +50,63 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
         self.real.chmod(0o755)
         helper = root / "codex-bwrap-probe.py"
         helper.write_text(
-            (WORKER / "codex-bwrap-probe.py")
-            .read_text(encoding="utf-8")
-            .replace(
-                'REAL_BWRAP = "/opt/codex-sandbox/bwrap.real"',
-                f"REAL_BWRAP = {str(self.real)!r}",
-            ),
+            (WORKER / "codex-bwrap-probe.py").read_text(encoding="utf-8")
+            .replace('REAL_BWRAP = "/opt/codex-sandbox/bwrap.real"',
+                     f"REAL_BWRAP = {str(self.real)!r}"),
             encoding="utf-8",
         )
         self.wrapper = root / "bwrap"
         # Change trusted paths only in a private test copy, never via a runtime
         # environment override that could redirect production sandbox setup.
         self.wrapper.write_text(
-            (WORKER / "codex-bwrap")
-            .read_text(encoding="utf-8")
-            .replace(
-                "REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={self.real}"
-            )
-            .replace(
-                'HIDDEN_DIRS="/run/s6 /data/remote_control_control /data/github"',
-                f'HIDDEN_DIRS="{root}/run/s6 {root}/data/remote_control_control {root}/data/github"',
-            )
-            .replace(
-                'HIDDEN_FILES="/config/secrets.yaml /config/.storage/auth',
-                f'HIDDEN_FILES="{root}/config/secrets.yaml {root}/config/.storage/auth',
-            )
-            .replace(
-                "/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",
-                f"{sys.executable} {helper}",
-            ),
+            (WORKER / "codex-bwrap").read_text(encoding="utf-8")
+            .replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={self.real}")
+            .replace('HIDDEN_DIRS="/run/s6 /data/remote_control_control /data/github"',
+                     f'HIDDEN_DIRS="{root}/run/s6 {root}/data/remote_control_control {root}/data/github"')
+            .replace(' /data/', f' {root}/data/').replace('HIDDEN_FILES="/data/', f'HIDDEN_FILES="{root}/data/')
+            .replace("/usr/bin/python3 /opt/codex-sandbox/codex-bwrap-probe.py",
+                     f"{sys.executable} {helper}"),
             encoding="utf-8",
         )
         self.wrapper.chmod(0o755)
 
     def run_wrapper(
-        self,
-        args: list[str],
-        *,
-        stderr: bytes = PROC_ERROR,
-        stdout: bytes = b"",
-        exit_code: int = 1,
-        **extra: str,
+        self, args: list[str], *, stderr: bytes = PROC_ERROR,
+        stdout: bytes = b"", exit_code: int = 1, **extra: str,
     ) -> tuple[subprocess.CompletedProcess[bytes], dict]:
         """Run the wrapper against the fake Bubblewrap and return the result with what the fake recorded."""
         result = subprocess.run(
             [str(self.wrapper), *args],
-            env={
-                **os.environ,
-                "TEST_RECORD": str(self.record),
-                "TEST_STDERR": stderr.hex(),
-                "TEST_STDOUT": stdout.hex(),
-                "TEST_EXIT": str(exit_code),
-                **extra,
-            },
-            capture_output=True,
-            timeout=5,
-            check=False,
+            env={**os.environ, "TEST_RECORD": str(self.record),
+                 "TEST_STDERR": stderr.hex(), "TEST_STDOUT": stdout.hex(),
+                 "TEST_EXIT": str(exit_code), **extra},
+            capture_output=True, timeout=5, check=False,
         )
         return result, json.loads(self.record.read_text(encoding="utf-8"))
 
     def test_normalizes_only_recognized_failed_probe_lines(self) -> None:
         """A failed probe's known /proc error is rewritten to /newroot/proc, with stdout and the exit code unchanged."""
         for true in ("/bin/true", "/usr/bin/true"):
-            for error in (
-                b"Operation not permitted",
-                b"Permission denied",
-                b"Invalid argument",
-            ):
+            for error in (b"Operation not permitted", b"Permission denied", b"Invalid argument"):
                 for newline in (b"\n", b"\r\n", b""):
                     with self.subTest(true=true, error=error, newline=newline):
-                        diagnostic = (
-                            b"bwrap: Can't mount proc on /proc: " + error + newline
-                        )
+                        diagnostic = b"bwrap: Can't mount proc on /proc: " + error + newline
                         result, record = self.run_wrapper(
-                            [*PROBE[:-1], true],
-                            stderr=diagnostic,
-                            exit_code=17,
+                            [*PROBE[:-1], true], stderr=diagnostic, exit_code=17,
                             stdout=b"unchanged stdout\x00\xff",
                         )
                         self.assertEqual(result.returncode, 17)
-                        self.assertEqual(
-                            result.stderr,
-                            diagnostic.replace(b"on /proc:", b"on /newroot/proc:"),
-                        )
+                        self.assertEqual(result.stderr, diagnostic.replace(b"on /proc:", b"on /newroot/proc:"))
                         self.assertEqual(result.stdout, b"unchanged stdout\x00\xff")
-                        self.assertEqual(
-                            record["args"], ["--cap-drop", "ALL", *PROBE[:-1], true]
-                        )
+                        self.assertEqual(record["args"], ["--cap-drop", "ALL", *PROBE[:-1], true])
 
     def test_success_and_unrelated_errors_are_unchanged(self) -> None:
         """A successful probe and any error line other than the known ones keep their stderr and exit code."""
         cases = [
-            (PROC_ERROR, 0),
-            (RECOGNIZED_ERROR, 1),
+            (PROC_ERROR, 0), (RECOGNIZED_ERROR, 1),
             (b"bwrap: Creating new namespace failed: Operation not permitted\n", 1),
             (b"bwrap: Can't mount proc on /proc: No such file or directory\n", 1),
-            (b"prefix: " + PROC_ERROR, 1),
-            (b"\xff unrelated\x00", 1),
+            (b"prefix: " + PROC_ERROR, 1), (b"\xff unrelated\x00", 1),
             (PROC_ERROR.rstrip() + b" (extra detail)\n", 1),
         ]
         for diagnostic, code in cases:
@@ -180,38 +124,16 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
         """Real commands and near-matches of the probe go straight to Bubblewrap with their stderr unchanged."""
         separator = PROBE.index("--")
         cases = [
-            [
-                *PROBE[: separator + 1],
-                "/usr/local/bin/codex",
-                "--apply-seccomp-then-exec",
-                "--",
-                "/bin/true",
-            ],
-            [*PROBE, "extra"],
-            [*PROBE[:-1], "true"],
-            [
-                "--unshare-user",
-                "--unshare-pid",
-                "--unshare-net",
-                "--ro-bind",
-                "/",
-                "/",
-                "/bin/true",
-            ],
-            [*PROBE[: separator + 1], "/bin/sh", "-c", " ".join(PROBE)],
+            [*PROBE[:separator + 1], "/usr/local/bin/codex", "--apply-seccomp-then-exec", "--", "/bin/true"],
+            [*PROBE, "extra"], [*PROBE[:-1], "true"],
+            ["--unshare-user", "--unshare-pid", "--unshare-net", "--ro-bind", "/", "/", "/bin/true"],
+            [*PROBE[:separator + 1], "/bin/sh", "-c", " ".join(PROBE)],
         ]
-        for flag in (
-            "--as-pid-1",
-            "--new-session",
-            "--die-with-parent",
-            "--unshare-user",
-            "--unshare-pid",
-            "--unshare-ipc",
-        ):
+        for flag in ("--as-pid-1", "--new-session", "--die-with-parent", "--unshare-user", "--unshare-pid", "--unshare-ipc"):
             cases.append([arg for arg in PROBE if arg != flag])
         proc_index = PROBE.index("--proc")
-        cases.append([*PROBE[:proc_index], *PROBE[proc_index + 2 :]])
-        cases.append([*PROBE[: proc_index + 1], "/elsewhere", *PROBE[proc_index + 2 :]])
+        cases.append([*PROBE[:proc_index], *PROBE[proc_index + 2:]])
+        cases.append([*PROBE[:proc_index + 1], "/elsewhere", *PROBE[proc_index + 2:]])
         for args in cases:
             with self.subTest(args=args):
                 result, record = self.run_wrapper(args, exit_code=19)
@@ -219,104 +141,53 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 19)
                 self.assertEqual(record["args"], ["--cap-drop", "ALL", *args])
 
-    def test_secrets_and_the_container_environment_are_hidden_in_every_sandbox(
-        self,
-    ) -> None:
-        """Existing secret files get /dev/null and the s6 folder a tmpfs, just before the first separator."""
+    def test_the_app_private_files_are_hidden_and_config_files_are_not(self) -> None:
+        """The app's tokens and the s6 folder are masked just before the first separator; nothing in /homeassistant is."""
         root = Path(self.directory.name)
         (root / "run" / "s6" / "container_environment").mkdir(parents=True)
         (root / "config" / ".storage").mkdir(parents=True)
-        (root / "config" / "secrets.yaml").write_text("token: x\n", encoding="utf-8")
-        (root / "config" / ".storage" / "auth").write_text("{}", encoding="utf-8")
-        args = [
-            "--ro-bind",
-            "/",
-            "/",
-            "--bind",
-            str(root / "config"),
-            str(root / "config"),
-            "--",
-            "/usr/local/bin/codex",
-            "--apply-seccomp-then-exec",
-            "--",
-            "/bin/sh",
-            "-c",
-            "cat secrets.yaml",
-        ]
+        (root / "data").mkdir()
+        config_files = [root / "config" / "secrets.yaml", root / "config" / ".storage" / "auth",
+                        root / "config" / ".storage" / "auth_provider.homeassistant"]
+        private_files = [root / "data" / name for name in ("options.json", "worker_api_token", "schedules.sqlite3")]
+        for path in config_files + private_files:
+            path.write_text("synthetic\n", encoding="utf-8")
+        args = ["--ro-bind", "/", "/", "--bind", str(root / "config"), str(root / "config"), "--",
+                "/usr/local/bin/codex", "--apply-seccomp-then-exec", "--", "/bin/sh", "-c", "cat secrets.yaml"]
         _, record = self.run_wrapper(args, stderr=b"", exit_code=0)
-        masks = [
-            "--tmpfs",
-            str(root / "run" / "s6"),
-            "--ro-bind",
-            "/dev/null",
-            str(root / "config" / "secrets.yaml"),
-            "--ro-bind",
-            "/dev/null",
-            str(root / "config" / ".storage" / "auth"),
-        ]
-        self.assertEqual(
-            record["args"], ["--cap-drop", "ALL", *args[:6], *masks, *args[6:]]
-        )
+        masks = ["--tmpfs", str(root / "run" / "s6")]
+        for path in private_files:
+            masks += ["--ro-bind", "/dev/null", str(path)]
+        self.assertEqual(record["args"], ["--cap-drop", "ALL", *args[:6], *masks, *args[6:]])
+        # The owner's secrets.yaml and Home Assistant's sign-in files stay readable, as in the Claude add-on.
+        for path in config_files:
+            with self.subTest(path=path.name):
+                self.assertNotIn(str(path), record["args"])
 
     def test_the_github_folder_is_hidden_in_every_sandbox(self) -> None:
         """A task's sandbox cannot read the GitHub sign-in: /data/github gets an empty tmpfs before the first --."""
         root = Path(self.directory.name)
         (root / "data" / "github").mkdir(parents=True)
-        (root / "data" / "github" / "credential.json").write_text(
-            '{"token": "synthetic"}', encoding="utf-8"
-        )
-        args = [
-            "--ro-bind",
-            "/",
-            "/",
-            "--ro-bind",
-            str(root / "data"),
-            str(root / "data"),
-            "--",
-            "/usr/local/bin/codex",
-            "--apply-seccomp-then-exec",
-            "--",
-            "/bin/sh",
-            "-c",
-            "cat /data/github/credential.json",
-        ]
+        (root / "data" / "github" / "credential.json").write_text('{"token": "synthetic"}', encoding="utf-8")
+        args = ["--ro-bind", "/", "/", "--ro-bind", str(root / "data"), str(root / "data"), "--",
+                "/usr/local/bin/codex", "--apply-seccomp-then-exec", "--", "/bin/sh", "-c",
+                "cat /data/github/credential.json"]
         _, record = self.run_wrapper(args, stderr=b"", exit_code=0)
         separator = record["args"].index("--")
-        self.assertEqual(
-            record["args"][separator - 2 : separator],
-            ["--tmpfs", str(root / "data" / "github")],
-        )
-        self.assertEqual(
-            record["args"],
-            [
-                "--cap-drop",
-                "ALL",
-                *args[:6],
-                "--tmpfs",
-                str(root / "data" / "github"),
-                *args[6:],
-            ],
-        )
+        self.assertEqual(record["args"][separator - 2:separator], ["--tmpfs", str(root / "data" / "github")])
+        self.assertEqual(record["args"], ["--cap-drop", "ALL", *args[:6], "--tmpfs", str(root / "data" / "github"),
+                                          *args[6:]])
         # The production wrapper names the real folder.
-        self.assertIn(
-            "/data/github",
-            (WORKER / "codex-bwrap")
-            .read_text(encoding="utf-8")
-            .split("HIDDEN_DIRS=", 1)[1]
-            .split("\n", 1)[0],
-        )
+        self.assertIn("/data/github", (WORKER / "codex-bwrap").read_text(encoding="utf-8").split("HIDDEN_DIRS=", 1)[1]
+                      .split("\n", 1)[0])
 
     def test_version_and_help_remain_usable(self) -> None:
         """The --version and --help options still reach Bubblewrap and return its output."""
         for option in ("--version", "--help"):
-            result, record = self.run_wrapper(
-                [option], stderr=b"", stdout=b"supported options\n", exit_code=0
-            )
+            result, record = self.run_wrapper([option], stderr=b"", stdout=b"supported options\n", exit_code=0)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout, b"supported options\n")
-            expected = (
-                [option] if option == "--version" else ["--cap-drop", "ALL", option]
-            )
+            expected = [option] if option == "--version" else ["--cap-drop", "ALL", option]
             self.assertEqual(record["args"], expected)
 
     def test_normal_path_exec_preserves_pid(self) -> None:
@@ -324,8 +195,7 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
         with subprocess.Popen(
             [str(self.wrapper), "--", "/bin/true"],
             env={**os.environ, "TEST_RECORD": str(self.record)},
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         ) as child:
             child.communicate(timeout=5)
             self.assertEqual(child.returncode, 0)
@@ -338,14 +208,8 @@ class BubblewrapCompatibilityTests(unittest.TestCase):
             file.seek(0)
             result = subprocess.run(
                 [str(self.wrapper), *PROBE],
-                env={
-                    **os.environ,
-                    "TEST_RECORD": str(self.record),
-                    "TEST_FD": str(file.fileno()),
-                },
-                pass_fds=(file.fileno(),),
-                capture_output=True,
-                timeout=5,
+                env={**os.environ, "TEST_RECORD": str(self.record), "TEST_FD": str(file.fileno())},
+                pass_fds=(file.fileno(),), capture_output=True, timeout=5,
             )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(self.record.read_text())["fd"], "mount descriptor")

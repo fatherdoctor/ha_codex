@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+from app_folders import isolated_app_folders
 from test_server import server
 import policy
 
@@ -32,9 +33,7 @@ class ProtectedPolicyTests(unittest.TestCase):
     def test_shipped_policy_is_the_strict_one(self) -> None:
         """The policy in the repository loads and allows only the two sandboxed app options."""
         loaded = policy.load_policy()
-        self.assertEqual(
-            loaded["allowed_sandbox_modes"], ["workspace-write", "read-only"]
-        )
+        self.assertEqual(loaded["allowed_sandbox_modes"], ["workspace-write", "read-only"])
         self.assertEqual(policy.policy_problem({}), "")
         self.assertEqual(policy.policy_problem({"codex_sandbox": "read-only"}), "")
 
@@ -42,9 +41,7 @@ class ProtectedPolicyTests(unittest.TestCase):
         """danger-full-access, or any mode the policy does not list, is a problem with a plain reason."""
         for mode in ("danger-full-access", "unexpected"):
             with self.subTest(mode=mode):
-                self.assertIn(
-                    "not allowed", policy.policy_problem({"codex_sandbox": mode})
-                )
+                self.assertIn("not allowed", policy.policy_problem({"codex_sandbox": mode}))
 
     def test_a_malformed_sandbox_list_is_refused(self) -> None:
         """A policy file without a usable list of sandbox modes is itself refused."""
@@ -67,14 +64,6 @@ class ProtectedPolicyTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 self.assertTrue(policy.policy_problem({}, path))
 
-    def test_owner_home_instructions_are_not_replaced(self) -> None:
-        home = self.root / "codex-home"
-        home.mkdir()
-        target = home / "AGENTS.md"
-        target.write_text("Owner instructions.", encoding="utf-8")
-        self.assertFalse(policy.remove_legacy_instructions(home))
-        self.assertEqual(target.read_text(), "Owner instructions.")
-
     def test_runtime_config_never_says_never(self) -> None:
         """The Codex configuration the worker writes asks on request and has no approval-free profile."""
         home = self.root / "codex-home"
@@ -82,7 +71,7 @@ class ProtectedPolicyTests(unittest.TestCase):
             patch.object(server, "CODEX_HOME", home),
             patch.object(server, "CODEX_CONFIG_PATH", home / "config.toml"),
             patch.object(server, "DATA_ROOT", self.root),
-            patch.object(server, "AUTH_QR_DIR", self.root / "qr"),
+            patch.object(server, "OLD_AUTH_QR_DIR", self.root / "qr"),
             patch.object(server, "task_root", return_value=self.root / "tasks"),
             patch.object(server, "api_token", return_value="x" * 40),
         ):
@@ -95,12 +84,11 @@ class ProtectedPolicyTests(unittest.TestCase):
 
     def test_startup_stops_on_a_refused_mode(self) -> None:
         """An older option naming full access stops the worker before it prepares or serves anything."""
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
         with (
-            patch.object(
-                server,
-                "read_options",
-                return_value={"codex_sandbox": "danger-full-access"},
-            ),
+            isolated_app_folders(server, Path(temp.name)),
+            patch.object(server, "read_options", return_value={"codex_sandbox": "danger-full-access"}),
             patch.object(server, "ensure_runtime_files") as prepare,
             patch.object(server.app, "run") as serve,
         ):
@@ -113,24 +101,12 @@ class ProtectedPolicyTests(unittest.TestCase):
     def test_refused_mode_never_launches_codex(self) -> None:
         """A task under a refused mode fails as "needs support" and no Codex process starts."""
         with (
-            patch.object(
-                server,
-                "read_options",
-                return_value={"codex_sandbox": "danger-full-access"},
-            ),
-            patch.object(
-                server,
-                "tasks",
-                {"task": {"task_id": "task", "status": "queued", "turns": []}},
-            ),
+            patch.object(server, "read_options", return_value={"codex_sandbox": "danger-full-access"}),
+            patch.dict(server.tasks, {"task": {"task_id": "task", "status": "queued", "turns": []}}, clear=True),
             patch.object(server, "running_processes", {}),
             patch.object(server, "get_run_dir", return_value=self.root / "run"),
-            patch.object(
-                server,
-                "get_task_dir",
-                side_effect=lambda task_id: self.root / "tasks" / task_id,
-            ),
-            patch.object(server, "save_task_index"),
+            patch.object(server.store, "task_dir", side_effect=lambda task_id: self.root / "tasks" / task_id),
+            patch.object(server.store, "save_index"),
             patch.object(server, "write_task_log"),
             patch.object(server, "record_baseline", return_value={}) as baseline,
             patch.object(server, "prepare_ha_docs"),

@@ -1,22 +1,22 @@
 """What the worker reports about the Codex integration: installed, recent enough, and in touch with the worker."""
-
 from __future__ import annotations
 
-from contextlib import ExitStack
 import json
-from pathlib import Path
 import tempfile
 import time
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
+
 
 LONG_AGO = 10 * server.INTEGRATION_CONTACT_SECONDS
 
 
 class IntegrationStatusTests(unittest.TestCase):
-    """The state of the Codex integration, from its files in /config and its calls to the worker."""
+    """The state of the Codex integration, from its files in /homeassistant and its calls to the worker."""
 
     def setUp(self):
         """Point the worker at an empty configuration folder, started long ago and never called by the integration."""
@@ -24,18 +24,13 @@ class IntegrationStatusTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.manifest = root / "custom_components" / "codex_cli" / "manifest.json"
+        self.stack.enter_context(patch.object(server, "INTEGRATION_MANIFEST_PATH", self.manifest))
+        # The chat page reads the schedule store under DATA_ROOT; keep it off the real /data.
+        self.stack.enter_context(patch.object(server, "DATA_ROOT", root / "data"))
         self.stack.enter_context(
-            patch.object(server, "INTEGRATION_MANIFEST_PATH", self.manifest)
+            patch.dict(server.integration_state, {"started": time.monotonic() - LONG_AGO, "seen": None})
         )
-        self.stack.enter_context(
-            patch.dict(
-                server.integration_state,
-                {"started": time.monotonic() - LONG_AGO, "seen": None},
-            )
-        )
-        self.stack.enter_context(
-            patch.object(server, "api_token", return_value="test-token")
-        )
+        self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "refresh_usage_status_async"))
         self.client = server.app.test_client()
 
@@ -43,10 +38,7 @@ class IntegrationStatusTests(unittest.TestCase):
         """Write the integration's manifest with the given version, or with the given text as it is."""
         self.manifest.parent.mkdir(parents=True, exist_ok=True)
         self.manifest.write_text(
-            json.dumps({"domain": "codex_cli", "version": version})
-            if text is None
-            else text,
-            encoding="utf-8",
+            json.dumps({"domain": "codex_cli", "version": version}) if text is None else text, encoding="utf-8"
         )
 
     def called(self, seconds_ago=0.0):
@@ -58,15 +50,11 @@ class IntegrationStatusTests(unittest.TestCase):
         return server.integration_status()["state"]
 
     def test_without_the_files_the_integration_is_not_installed(self):
-        """No manifest in /config means not installed, right away, even while the worker is still starting."""
+        """No manifest in /homeassistant means not installed, right away, even while the worker is still starting."""
         server.integration_state["started"] = time.monotonic()
         self.assertEqual(
             server.integration_status(),
-            {
-                "state": "not_installed",
-                "version": "",
-                "minimum_version": server.MIN_INTEGRATION_VERSION,
-            },
+            {"state": "not_installed", "version": "", "minimum_version": server.MIN_INTEGRATION_VERSION},
         )
         # A folder without a manifest is not an installed integration either.
         self.manifest.parent.mkdir(parents=True)
@@ -97,13 +85,9 @@ class IntegrationStatusTests(unittest.TestCase):
     def test_a_worker_that_just_started_waits_for_the_integration(self):
         """Right after the worker starts, a missing call is not reported yet: the integration may still be finding it."""
         self.install()
-        server.integration_state["started"] = time.monotonic() - (
-            server.INTEGRATION_CONTACT_SECONDS - 5
-        )
+        server.integration_state["started"] = time.monotonic() - (server.INTEGRATION_CONTACT_SECONDS - 5)
         self.assertEqual(self.state(), "starting")
-        server.integration_state["started"] = time.monotonic() - (
-            server.INTEGRATION_CONTACT_SECONDS + 5
-        )
+        server.integration_state["started"] = time.monotonic() - (server.INTEGRATION_CONTACT_SECONDS + 5)
         self.assertEqual(self.state(), "not_connected")
 
     def test_an_integration_older_than_the_minimum_is_outdated(self):
@@ -161,19 +145,7 @@ class IntegrationStatusTests(unittest.TestCase):
         # The comparison relies on the worker's own minimum being one.
         self.assertIsNotNone(server.version_tuple(server.MIN_INTEGRATION_VERSION))
         # The last text value is made of digits from another script.
-        for value in (
-            "",
-            "0.1.",
-            ".1",
-            "0..1",
-            "0.1.70b1",
-            "v0.1.70",
-            "0.1.70-dev",
-            "٠.١",
-            None,
-            70,
-            ["0.1.70"],
-        ):
+        for value in ("", "0.1.", ".1", "0..1", "0.1.70b1", "v0.1.70", "0.1.70-dev", "٠.١", None, 70, ["0.1.70"]):
             with self.subTest(value=value):
                 self.assertIsNone(server.version_tuple(value))
 
@@ -190,33 +162,19 @@ class IntegrationStatusTests(unittest.TestCase):
         self.assertIsNone(server.integration_state["seen"])
 
         # A wrong token is refused and does not count either.
-        self.assertEqual(
-            self.client.get(
-                "/status", headers={"Authorization": "Bearer wrong"}
-            ).status_code,
-            401,
-        )
+        self.assertEqual(self.client.get("/status", headers={"Authorization": "Bearer wrong"}).status_code, 401)
         self.assertIsNone(server.integration_state["seen"])
 
         # The integration's own call counts, and the web UI sees it on its next read.
-        response = self.client.get(
-            "/status", headers={"Authorization": "Bearer test-token"}
-        )
+        response = self.client.get("/status", headers={"Authorization": "Bearer test-token"})
         self.assertEqual(response.json["integration"]["state"], "ok")
-        self.assertEqual(
-            self.client.get("/status", **ingress).json["integration"]["state"], "ok"
-        )
+        self.assertEqual(self.client.get("/status", **ingress).json["integration"]["state"], "ok")
 
     def test_any_authenticated_route_counts_as_a_call(self):
         """The integration is in touch whichever route it calls, such as listing tasks for an action."""
         self.install()
-        with patch.object(server, "tasks", {}):
-            self.assertEqual(
-                self.client.get(
-                    "/tasks", headers={"Authorization": "Bearer test-token"}
-                ).status_code,
-                200,
-            )
+        with patch.dict(server.tasks, {}, clear=True):
+            self.assertEqual(self.client.get("/tasks", headers={"Authorization": "Bearer test-token"}).status_code, 200)
         self.assertEqual(self.state(), "ok")
 
 

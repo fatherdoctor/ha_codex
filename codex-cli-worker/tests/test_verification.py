@@ -1,33 +1,26 @@
-"""Verification boundaries, evidence ownership, and credential protection."""
-
+"""Verification boundaries, result ownership, and credential protection."""
+import ast
+import inspect
 import json
 import os
-from pathlib import Path
-import subprocess
-import sys
 import tarfile
 import tempfile
-import time
 import unittest
-from unittest.mock import MagicMock, Mock, patch
+from pathlib import Path
+from unittest.mock import Mock, patch
 
 from test_server import server
 import tool_threads
-from verification import (
-    DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
-    MAX_BROWSERS,
-    Verification,
-    browser_memory_limit,
-    browser_process_memory,
-    kill_tracked_processes,
-    track_browser_processes,
-)
+import verification
+from verification import Verification
+import verification_mcp
+
 
 THREAD = "11111111-2222-4333-8444-555555555555"
 
 
 class VerificationTests(unittest.TestCase):
-    """Checks, browser captures, and credential handling for one running chat turn."""
+    """Checks and credential handling for one running chat turn."""
 
     def setUp(self):
         """Create a temporary worker with one running chat turn and begin verification for it."""
@@ -37,12 +30,11 @@ class VerificationTests(unittest.TestCase):
         self.config = self.root / "config"
         self.config.mkdir()
         self.options = {**server.DEFAULT_OPTIONS, "task_root": str(self.root / "tasks")}
-        for key, value in {
-            "CONFIG_ROOT": self.config,
-            "DATA_ROOT": self.root,
-            "TASK_STATE_FILE": self.root / "index.json",
-            "tasks": {},
-        }.items():
+        patcher = patch.dict(server.tasks, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key, value in {"CONFIG_ROOT": self.config, "DATA_ROOT": self.root,
+                           "TASK_STATE_FILE": self.root / "index.json"}.items():
             patcher = patch.object(server, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -51,12 +43,8 @@ class VerificationTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         server.get_task_dir("chat").mkdir(parents=True)
         turn = server.new_turn("Check my dashboard")
-        server.tasks["chat"] = {
-            "task_id": "chat",
-            "status": "running",
-            "current_turn_id": turn["turn_id"],
-            "turns": [turn],
-        }
+        server.tasks["chat"] = {"task_id": "chat", "status": "running",
+                                "current_turn_id": turn["turn_id"], "turns": [turn]}
         self.engine = Verification(server)
         tool_threads.CHATS.bind("chat", THREAD)
         self.addCleanup(tool_threads.CHATS.release, "chat")
@@ -65,17 +53,10 @@ class VerificationTests(unittest.TestCase):
     def test_an_ended_exchange_is_refused_and_unsupported_operations_are_not_run(self):
         """Reject an unbound thread and an ended exchange, and refuse operations outside the supported set."""
         with self.assertRaises(ValueError):
-            self.engine.dispatch(
-                {
-                    "thread_id": "99999999-2222-4333-8444-555555555555",
-                    "operation": "entity",
-                }
-            )
+            self.engine.dispatch({"thread_id": "99999999-2222-4333-8444-555555555555", "operation": "entity"})
         with self.assertRaises(ValueError):
             self.engine.dispatch({"capability": self.capability, "operation": "entity"})
-        result = self.engine.dispatch(
-            {"thread_id": THREAD, "operation": "call_service"}
-        )
+        result = self.engine.dispatch({"thread_id": THREAD, "operation": "call_service"})
         self.assertEqual(result["status"], "unavailable")
         self.engine.end("chat")
         with self.assertRaises(ValueError):
@@ -87,65 +68,29 @@ class VerificationTests(unittest.TestCase):
 
     def test_fresh_state_assertion_persists_in_this_turn(self):
         """Read the entity state again for each check and record it in the turn, with only the requested attributes."""
-        with patch.object(
-            self.engine,
-            "core",
-            side_effect=[
-                {"state": "off", "attributes": {"brightness": 0, "token": "private"}},
-                {"state": "on", "attributes": {"brightness": 100}},
-            ],
-        ) as core:
+        with patch.object(self.engine, "core", side_effect=[
+            {"state": "off", "attributes": {"brightness": 0, "token": "private"}},
+            {"state": "on", "attributes": {"brightness": 100}},
+        ]) as core:
             for expected in ("failed", "passed"):
-                result = self.engine.run(
-                    "chat",
-                    {
-                        "operation": "entity",
-                        "entity_id": "light.kitchen",
-                        "expected_state": "on",
-                        "attributes": ["brightness"],
-                    },
-                )
+                result = self.engine.run("chat", {"operation": "entity", "entity_id": "light.kitchen",
+                                                  "expected_state": "on", "attributes": ["brightness"]})
                 self.assertEqual(result["status"], expected)
                 self.assertNotIn("token", result["attributes"])
             self.assertEqual(core.call_count, 2)
         self.assertEqual(len(server.tasks["chat"]["turns"][0]["verification"]), 2)
-        self.assertNotIn(
-            self.capability, json.dumps(server.task_payload(server.tasks["chat"]))
-        )
+        self.assertNotIn(self.capability, json.dumps(server.task_payload(server.tasks["chat"])))
         self.engine.begin("chat")
         self.assertEqual(server.tasks["chat"]["verification"], [])
 
     def test_find_runs_as_a_check_and_is_recorded_in_this_turn(self):
         """Look an entity up by name through the same capability, limits and record as every other check."""
-        states = [
-            {
-                "entity_id": "light.kitchen_ceiling",
-                "state": "on",
-                "attributes": {"friendly_name": "Kitchen Ceiling"},
-            }
-        ]
-        with (
-            patch("verification.fetch_states", return_value=states),
-            patch.object(server, "ha_token", return_value="synthetic"),
-        ):
-            result = self.engine.dispatch(
-                {"thread_id": THREAD, "operation": "find", "name": "kitchen ceiling"}
-            )
-        self.assertEqual(
-            result["matches"],
-            [
-                {
-                    "entity_id": "light.kitchen_ceiling",
-                    "name": "Kitchen Ceiling",
-                    "state": "on",
-                }
-            ],
-        )
+        states = [{"entity_id": "light.kitchen_ceiling", "state": "on", "attributes": {"friendly_name": "Kitchen Ceiling"}}]
+        with patch("verification.fetch_states", return_value=states), patch.object(server, "ha_token", return_value="synthetic"):
+            result = self.engine.dispatch({"thread_id": THREAD, "operation": "find", "name": "kitchen ceiling"})
+        self.assertEqual(result["matches"], [{"entity_id": "light.kitchen_ceiling", "name": "Kitchen Ceiling", "state": "on"}])
         recorded = server.tasks["chat"]["turns"][0]["verification"]
-        self.assertEqual(
-            [(check["operation"], check["status"]) for check in recorded],
-            [("find", "observed")],
-        )
+        self.assertEqual([(check["operation"], check["status"]) for check in recorded], [("find", "observed")])
 
     def test_expired_check_cannot_record_results_in_a_finished_or_replaced_turn(self):
         """Discard the result of a check whose turn ended, completed, or was replaced while it ran."""
@@ -153,7 +98,6 @@ class VerificationTests(unittest.TestCase):
             with self.subTest(outcome=outcome):
                 server.tasks["chat"]["status"] = "running"
                 self.engine.begin("chat")
-
                 def read(*_args, **_kwargs):
                     """End, complete, or replace the turn while the entity state is being read."""
                     if outcome == "ended":
@@ -163,394 +107,134 @@ class VerificationTests(unittest.TestCase):
                     else:
                         self.engine.begin("chat")
                     return {"state": "on", "attributes": {}}
-
                 with patch.object(self.engine, "core", side_effect=read):
-                    result = self.engine.run(
-                        "chat", {"operation": "entity", "entity_id": "light.kitchen"}
-                    )
+                    result = self.engine.run("chat", {"operation": "entity", "entity_id": "light.kitchen"})
                 self.assertEqual(result["status"], "unavailable")
                 self.assertEqual(server.tasks["chat"]["verification"], [])
 
     def test_malformed_thread_ids_and_other_app_logs_fail_closed(self):
         """Reject malformed thread ids and refuse another app's logs without calling Home Assistant."""
-        for value in (
-            "שלום",
-            "",
-            None,
-            [],
-            1,
-            THREAD.replace("1", "A"),
-            "abcdefab-2222-4333-8444-555555555555".upper(),
-        ):
+        for value in ("שלום", "", None, [], 1, THREAD.replace("1", "A"), "abcdefab-2222-4333-8444-555555555555".upper()):
             with self.subTest(thread=value), self.assertRaises(ValueError):
                 self.engine.dispatch({"thread_id": value, "operation": "entity"})
         with self.assertRaises(ValueError):
             self.engine.dispatch({"operation": "entity"})
         with patch.object(self.engine, "core") as core:
-            result = self.engine.run(
-                "chat", {"operation": "logs", "target": "core_mosquitto"}
-            )
+            result = self.engine.run("chat", {"operation": "logs", "target": "core_mosquitto"})
         self.assertEqual(result["status"], "unavailable")
         core.assert_not_called()
 
     def test_dashboard_readback_compares_configuration_not_save_ack(self):
         """Fail the readback when the dashboard Home Assistant returns differs from the expected configuration."""
         with patch.object(self.engine, "ws_read", return_value={"views": []}):
-            result = self.engine.run(
-                "chat",
-                {
-                    "operation": "dashboard_readback",
-                    "path": "/lovelace/0",
-                    "expected_config": {"views": [{"title": "Missing"}]},
-                },
-            )
+            result = self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0",
+                                              "expected_config": {"views": [{"title": "Missing"}]}})
         self.assertEqual(result["status"], "failed")
-
-    def test_automatic_dashboard_checks_respect_the_remaining_turn_budget(self):
-        """Limit automatic dashboard captures to the browser budget left in the turn, recording no refused check."""
-        config = {
-            "views": [{"path": f"view-{index}"} for index in range(MAX_BROWSERS + 1)]
-        }
-        storage = self.config / ".storage"
-        storage.mkdir()
-        refs = []
-        for name in ("first", "second"):
-            (storage / name).write_text(json.dumps({"data": {"config": config}}))
-            refs.append(
-                {"success": True, "storage_file": f".storage/{name}", "url_path": name}
-            )
-        for previous in (0, 1, MAX_BROWSERS):
-            with self.subTest(previous=previous):
-                self.engine.begin("chat")
-                with (
-                    patch.object(
-                        self.engine, "browser", return_value={"status": "captured"}
-                    ) as browser,
-                    patch.object(self.engine, "ws_read", return_value=config),
-                ):
-                    for index in range(previous):
-                        self.engine.run(
-                            "chat",
-                            {"operation": "dashboard", "path": f"/manual/{index}"},
-                        )
-                    self.engine.after_changes("chat", refs)
-                self.assertEqual(browser.call_count, MAX_BROWSERS)
-                paths = [
-                    call.args[1]["path"] for call in browser.call_args_list[previous:]
-                ]
-                self.assertEqual(
-                    paths,
-                    [
-                        f"/first/view-{index}"
-                        for index in range(MAX_BROWSERS - previous)
-                    ],
-                )
-                checks = server.tasks["chat"]["verification"]
-                self.assertEqual(
-                    [check["status"] for check in checks].count("passed"), 2
-                )
-                self.assertNotIn("unavailable", [check["status"] for check in checks])
 
     def test_websocket_read_authenticates_and_closes_the_actual_client_interface(self):
         """Authenticate the WebSocket read with the Home Assistant token and close a client that only offers close()."""
         # websocket-client has close(), but no context manager methods.
         ws = Mock(spec=["recv", "send", "close"])
         ws.recv.side_effect = [
-            '{"type":"auth_required"}',
-            '{"type":"auth_ok"}',
+            '{"type":"auth_required"}', '{"type":"auth_ok"}',
             '{"id":1,"type":"result","success":true,"result":{"views":[]}}',
         ]
-        with (
-            patch("verification.websocket.create_connection", return_value=ws),
-            patch.object(server, "ha_token", return_value="supervisor-secret"),
-        ):
-            self.assertEqual(
-                self.engine.ws_read({"type": "lovelace/config"}), {"views": []}
-            )
-        self.assertEqual(
-            json.loads(ws.send.call_args_list[0].args[0]),
-            {"type": "auth", "access_token": "supervisor-secret"},
-        )
+        with patch("verification.websocket.create_connection", return_value=ws), patch.object(server, "ha_token", return_value="supervisor-secret"):
+            self.assertEqual(self.engine.ws_read({"type": "lovelace/config"}), {"views": []})
+        self.assertEqual(json.loads(ws.send.call_args_list[0].args[0]), {"type": "auth", "access_token": "supervisor-secret"})
         ws.close.assert_called_once()
 
-    def test_paths_and_disabled_browser_fail_before_auth(self):
-        """Reject unsafe paths and prevent disabled captures from issuing credentials or launching."""
-        with patch.object(self.engine, "core") as core:
-            for path in (
-                "https://evil.test/",
-                "//evil",
-                "/lovelace/%2e%2e",
-                "/lovelace/0?token=x",
-            ):
-                self.assertEqual(
-                    self.engine.run("chat", {"operation": "dashboard", "path": path})[
-                        "status"
-                    ],
-                    "unavailable",
-                )
-            self.options["browser_verification"] = False
-            self.engine.begin("chat")
-            with patch("verification.subprocess.Popen") as launch:
-                self.assertEqual(
-                    self.engine.run(
-                        "chat", {"operation": "dashboard", "path": "/lovelace/0"}
-                    )["status"],
-                    "disabled",
-                )
-                launch.assert_not_called()
-            core.assert_not_called()
-
-    def test_browser_session_revoked_when_launch_fails(self):
-        """Revoke the browser session and keep its token out of the result when the browser cannot start."""
-        with patch.object(
-            self.engine,
-            "core",
-            return_value={
-                "session_id": "lease",
-                "url": "http://homeassistant:8123",
-                "access_token": "private",
-            },
-        ) as core:
-            with patch(
-                "verification.subprocess.Popen", side_effect=OSError("unavailable")
-            ):
-                result = self.engine.run(
-                    "chat", {"operation": "dashboard", "path": "/lovelace/0"}
-                )
+    def test_no_operation_renders_or_screenshots_a_dashboard(self):
+        """The dashboard capture is gone: the tool does not offer it and the worker refuses it without a Core call."""
+        self.assertNotIn("dashboard", verification_mcp.TOOL["inputSchema"]["properties"]["operation"]["enum"])
+        self.assertNotIn("screenshot", verification_mcp.TOOL["description"])
+        with patch.object(self.engine, "core") as core, patch("verification.requests.request") as request:
+            result = self.engine.run("chat", {"operation": "dashboard", "path": "/lovelace/0"})
         self.assertEqual(result["status"], "unavailable")
-        core.assert_called_with(
-            "DELETE", "codex_cli/browser_session", json={"session_id": "lease"}
-        )
-        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("dashboard,", result["message"])
+        core.assert_not_called()
+        request.assert_not_called()
+        self.assertFalse(hasattr(self.engine, "browser"))
+        self.assertFalse(hasattr(self.engine, "request_retry"))
+        # The AppArmor profile lets the app run no browser either.
+        profile = (Path(__file__).resolve().parents[1] / "apparmor.txt").read_text(encoding="utf-8").lower()
+        for name in ("chromium", "chrome", "playwright"):
+            self.assertNotIn(name, profile)
 
-    def test_kiosk_captures_join_browser_evidence_and_survive_reload(self):
-        """Attach every matching display to the same turn and retain its image after reloading task metadata."""
-        png = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
-        original_popen = subprocess.Popen
+    def test_readback_with_save_pending_saves_the_turn_edit_first(self):
+        """save_pending on a readback saves the pending edit, then reads the dashboard back; without it, nothing is saved."""
+        calls = []
+        with patch.object(self.engine, "save_pending_dashboard", side_effect=lambda *a: calls.append(("save", a))), \
+             patch.object(self.engine, "ws_read", side_effect=lambda m: calls.append(("read", m)) or {"views": [{}]}):
+            result = self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0",
+                                              "save_pending": True})
+            self.assertEqual(result["status"], "observed")
+            self.assertEqual([name for name, _ in calls], ["save", "read"])
+            self.assertEqual(calls[0][1], ("chat", "/lovelace/0"))
+            calls.clear()
+            self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0"})
+            self.assertEqual([name for name, _ in calls], ["read"])
 
-        def launch(_args, **kwargs):
-            """Exercise browser stdin and screenshot storage without launching Chromium."""
-            script = (
-                "import json,sys; from pathlib import Path; p=json.load(sys.stdin); "
-                f"[(Path(p['directory'])/(name+'.png')).write_bytes({png!r}) for name in ('desktop','mobile')]; "
-                "print(json.dumps({'status':'captured','screenshots':[{'name':'desktop'},{'name':'mobile'}]}))"
-            )
-            return original_popen([sys.executable, "-c", script], **kwargs)
+    def test_readback_with_a_bad_path_saves_nothing(self):
+        """A path that is not a local dashboard path is refused before the pending edit is saved."""
+        for path in ("/lovelace/0?edit=1", "https://example.test/lovelace", 7, None, ["/lovelace/0"]):
+            with self.subTest(path=path), patch.object(self.engine, "save_pending_dashboard") as save, \
+                 patch.object(self.engine, "ws_read") as read:
+                result = self.engine.run("chat", {"operation": "dashboard_readback", "path": path,
+                                                  "save_pending": True})
+                self.assertEqual(result["status"], "unavailable")
+                self.assertIn("Use a local dashboard path", result["message"])
+                save.assert_not_called()
+                read.assert_not_called()
 
-        targets = [
-            {"entity_id": "image.renamed_tablet", "name": "Hall tablet"},
-            {"entity_id": "image.second_tablet", "name": "Kitchen tablet"},
-        ]
-
-        def core(method, path, **kwargs):
-            """Return only the kiosk targets selected by the authenticated Home Assistant endpoint."""
-            if path == "codex_cli/kiosk_screenshots":
-                self.assertEqual(
-                    kwargs["json"], {"path": "/dashboard-home/default_view"}
-                )
-                return {"screenshots": targets}
-            return {"session_id": "lease", "url": "http://homeassistant:8123"}
-
-        response = MagicMock()
-        response.__enter__.return_value = response
-        response.status_code = 200
-        response.iter_content.side_effect = lambda _size: iter([png])
-        with (
-            patch.object(self.engine, "core", side_effect=core),
-            patch("verification.requests.post", return_value=response) as capture,
-            patch.object(server, "ha_token", return_value="supervisor-secret"),
-            patch.object(server, "api_token", return_value="paired-secret"),
-            patch("verification.subprocess.Popen", side_effect=launch),
-        ):
-            result = self.engine.run(
-                "chat",
-                {"operation": "dashboard", "path": "/dashboard-home/default_view"},
-            )
-        self.assertEqual(result["status"], "captured")
-        self.assertEqual(
-            [item["entity_id"] for item in result["kiosk_screenshots"]],
-            [item["entity_id"] for item in targets],
-        )
-        self.assertEqual(len(result["image_paths"]), 4)
-        for call, target in zip(capture.call_args_list, targets):
-            self.assertEqual(
-                call.args, ("http://supervisor/core/api/codex_cli/kiosk_screenshots",)
-            )
-            self.assertEqual(
-                call.kwargs["json"],
-                {
-                    "path": "/dashboard-home/default_view",
-                    "entity_id": target["entity_id"],
-                    "worker_token": "paired-secret",
-                },
-            )
-            self.assertEqual(
-                call.kwargs["headers"], {"Authorization": "Bearer supervisor-secret"}
-            )
-            self.assertFalse(call.kwargs["allow_redirects"])
-        saved = json.loads((server.get_task_dir("chat") / "task.json").read_text())
-        self.assertEqual(len(saved["verification_attachments"]), 4)
-        server.tasks["chat"] = saved
-        client = server.app.test_client()
-        for item in saved["verification_attachments"]:
-            with patch.object(server, "is_ingress_request", return_value=True):
-                self.assertEqual(client.get(item["url"]).data, png)
-        self.assertNotIn("secret", json.dumps(saved))
-        self.capability = self.engine.begin("chat")
-        write = server._write_attachment_file
-        writes = 0
-
-        def fail_first_kiosk(*args, **kwargs):
-            """Fail the optional write after the desktop and mobile screenshots have been stored."""
-            nonlocal writes
-            writes += 1
-            if writes == 3:
-                raise OSError("Disk write failed")
-            return write(*args, **kwargs)
-
-        with (
-            patch.object(self.engine, "core", side_effect=core),
-            patch("verification.requests.post", return_value=response),
-            patch("verification.subprocess.Popen", side_effect=launch),
-            patch.object(
-                server, "_write_attachment_file", side_effect=fail_first_kiosk
-            ),
-        ):
-            result = self.engine.run(
-                "chat",
-                {"operation": "dashboard", "path": "/dashboard-home/default_view"},
-            )
-        self.assertEqual(result["status"], "captured")
-        self.assertEqual(
-            [
-                item["viewport"]
-                for item in server.tasks["chat"]["verification_attachments"]
-            ],
-            ["desktop", "mobile", "kiosk"],
-        )
-        self.assertEqual(
-            [item["entity_id"] for item in result["kiosk_screenshots"]],
-            ["image.second_tablet"],
-        )
-
-    def test_kiosk_absence_is_silent_and_failed_images_do_not_stop_other_devices(self):
-        """Skip absent integrations, unmatched devices, failed captures and oversized images without losing later captures."""
-        turn_id = server.tasks["chat"]["current_turn_id"]
-        for targets in ([], None, {}, "invalid", [None, "invalid", {}]):
-            with (
-                self.subTest(targets=targets),
-                patch.object(
-                    self.engine, "core", return_value={"screenshots": targets}
-                ),
-                patch("verification.requests.post") as capture,
-            ):
-                self.assertEqual(
-                    self.engine.kiosk_images(
-                        "chat", "/lovelace/0", turn_id, self.capability
-                    ),
-                    [],
-                )
-                capture.assert_not_called()
-        with patch.object(
-            self.engine,
-            "core",
-            side_effect=ValueError("Home Assistant returned HTTP 404"),
-        ):
-            self.assertEqual(
-                self.engine.kiosk_images(
-                    "chat", "/lovelace/0", turn_id, self.capability
-                ),
-                [],
-            )
-        responses = [MagicMock() for _ in range(7)]
-        for response in responses:
-            response.__enter__.return_value = response
-            response.status_code = 200
-        responses[0].status_code = 404
-        responses[1].iter_content.return_value = [b"x" * (5 * 1024 * 1024 + 1)]
-        for response in responses[2:]:
-            response.iter_content.return_value = [b"\x89PNG\r\n\x1a\n" + b"\0" * 16]
-        targets = [{"entity_id": f"image.tablet_{index}"} for index in range(7)]
-        with (
-            patch.object(self.engine, "core", return_value={"screenshots": targets}),
-            patch("verification.requests.post", side_effect=responses),
-        ):
-            images = self.engine.kiosk_images(
-                "chat", "/lovelace/0", turn_id, self.capability
-            )
-        self.assertEqual(
-            [item["entity_id"] for item in images],
-            [f"image.tablet_{index}" for index in range(2, 7)],
-        )
-        self.engine.end("chat")
-        with (
-            patch.object(self.engine, "core", return_value={"screenshots": targets}),
-            patch("verification.requests.post") as capture,
-        ):
-            self.assertEqual(
-                self.engine.kiosk_images(
-                    "chat", "/lovelace/0", turn_id, self.capability
-                ),
-                [],
-            )
-            capture.assert_not_called()
+    def test_readback_refuses_save_pending_when_auto_save_is_off(self):
+        """A refused save is reported, and the readback does not run as if the edit were saved."""
+        self.options["auto_save_lovelace"] = False
+        with patch.object(self.engine, "ws_read") as read:
+            result = self.engine.run("chat", {"operation": "dashboard_readback", "path": "/lovelace/0",
+                                              "save_pending": True})
+        self.assertEqual(result["status"], "unavailable")
+        self.assertIn("auto-save is disabled", result["message"])
+        read.assert_not_called()
 
     def test_snapshot_excludes_credentials_but_manifest_detects_changes(self):
-        """Credential files stay out of the archive but in change detection."""
-        for name in (
-            "secrets.yaml",
-            ".storage/auth",
-            ".storage/auth_provider.homeassistant",
-            ".storage/core.config_entries",
-            ".storage/lovelace",
-        ):
+        """Secret files (secrets.yaml and all of .storage) stay out of the archive but in change detection."""
+        for name in ("secrets.yaml", ".storage/auth", ".storage/auth_provider.homeassistant", ".storage/core.config_entries", ".storage/lovelace",
+                     "automations.yaml"):
             path = self.config / name
             path.parent.mkdir(exist_ok=True)
             path.write_text('{"private": "value"}')
         server.get_run_dir("chat").mkdir(parents=True)
         snapshot = server.create_snapshot("chat")
         with tarfile.open(snapshot["path"]) as archive:
-            self.assertEqual(archive.getnames(), [".storage/lovelace"])
+            self.assertEqual(archive.getnames(), ["automations.yaml"])
         self.assertIn("secrets.yaml", server.build_manifest())
         self.assertEqual(snapshot["file_count"], 1)
-        recovery = server.recovery_copies(
-            server.get_run_dir("chat"),
-            {"added": [], "changed": ["secrets.yaml"], "deleted": []},
-            ["secrets.yaml"],
-            {},
-        )
+        recovery = server.recovery_copies(server.get_run_dir("chat"),
+            {"added": [], "changed": ["secrets.yaml"], "deleted": []}, ["secrets.yaml"], {})
         details = server.validation_details(["secrets.yaml: bad YAML"], {}, recovery)
-        self.assertIn("excluded from recovery", details)
+        self.assertIn("have no recovery copies", details)
         self.assertNotIn("New files", details)
 
     def test_supervisor_token_is_not_in_subprocess_environment(self):
         """Keep the Supervisor tokens out of the environment Codex runs in."""
-        with patch.dict(
-            os.environ, {"SUPERVISOR_TOKEN": "private", "HASSIO_TOKEN": "private"}
-        ):
+        with patch.dict(os.environ, {"SUPERVISOR_TOKEN": "private", "HASSIO_TOKEN": "private"}):
             environment = server.codex_env()
         self.assertNotIn("SUPERVISOR_TOKEN", environment)
         self.assertNotIn("HASSIO_TOKEN", environment)
 
     def test_token_option_comes_with_the_address_it_works_at(self):
         """With the HA_TOKEN option Codex also gets HA_URL: Core's own address, or the ha_url option when it names another."""
-        with (
-            patch.object(server, "core_address", server.CoreAddress()),
-            patch.dict(
-                os.environ,
-                {"HA_URL": "http://stale.example.test", "HA_TOKEN": "inherited"},
-            ),
-        ):
+        with patch.object(server, "core_address", server.CoreAddress()), patch.dict(os.environ, {"HA_URL": "http://stale.example.test", "HA_TOKEN": "inherited"}):
             # Before discovery, neither stale inherited variable reaches Codex.
             environment = server.codex_env()
             self.assertNotIn("HA_TOKEN", environment)
             self.assertNotIn("HA_URL", environment)
-            server.core_address.refresh(
-                {},
-                "synthetic",
-                fetch=lambda _: {"result": "ok", "data": {"port": 8123, "ssl": False}},
-            )
-            self.assertIn("HA_URL", server.codex_env())
+            server.core_address.refresh({}, 'synthetic', fetch=lambda _: {'result': 'ok', 'data': {'port': 8123, 'ssl': False}})
+            # Without the HA_TOKEN option there is no HA_URL either: an unauthenticated call gets the app banned.
+            self.assertNotIn('HA_URL', server.codex_env())
+            with patch.dict(self.options, {"HA_TOKEN": "token"}):
+                self.assertIn('HA_URL', server.codex_env())
             addresses = {
                 None: "http://homeassistant:8123",
                 "  ": "http://homeassistant:8123",
@@ -561,198 +245,12 @@ class VerificationTests(unittest.TestCase):
                 "https://ha.example.test:8443/": "https://ha.example.test:8443",
             }
             for value, expected in addresses.items():
-                with (
-                    self.subTest(ha_url=value),
-                    patch.dict(self.options, {"HA_TOKEN": " token ", "ha_url": value}),
-                ):
+                with self.subTest(ha_url=value), patch.dict(self.options, {"HA_TOKEN": " token ", "ha_url": value}):
                     environment = server.codex_env()
-                    self.assertEqual(
-                        (environment["HA_TOKEN"], environment["HA_URL"]),
-                        ("token", expected),
-                    )
+                    self.assertEqual((environment["HA_TOKEN"], environment["HA_URL"]), ("token", expected))
         # The worker's own calls keep going through the Supervisor proxy with its token.
-        with (
-            patch.dict(os.environ, {"SUPERVISOR_TOKEN": "private"}),
-            patch.dict(self.options, {"ha_url": "https://ha.example.test"}),
-        ):
+        with patch.dict(os.environ, {"SUPERVISOR_TOKEN": "private"}), patch.dict(self.options, {"ha_url": "https://ha.example.test"}):
             self.assertEqual(server.ha_base_url(), "http://supervisor/core")
-
-    def test_browser_memory_budget_stops_process_and_revokes_session(self):
-        """Stop an over-budget browser and revoke its temporary session."""
-        original_popen = subprocess.Popen
-        processes = []
-
-        def launch(_args, **kwargs):
-            """Substitute a real waiting process for Chromium to observe cleanup."""
-            process = original_popen(
-                [
-                    sys.executable,
-                    "-c",
-                    "import sys,time; sys.stdin.read(); time.sleep(60)",
-                ],
-                **kwargs,
-            )
-            processes.append(process)
-            return process
-
-        with patch.object(
-            self.engine,
-            "core",
-            return_value={
-                "session_id": "lease",
-                "url": "http://homeassistant:8123",
-                "access_token": "private",
-            },
-        ) as core:
-            with (
-                patch("verification.subprocess.Popen", side_effect=launch),
-                patch(
-                    "verification.track_browser_processes",
-                    return_value=(DEFAULT_BROWSER_MEMORY_LIMIT_MIB + 1) * 1024 * 1024,
-                ),
-            ):
-                result = self.engine.run(
-                    "chat", {"operation": "dashboard", "path": "/lovelace/0"}
-                )
-        self.assertEqual(result["status"], "unavailable")
-        self.assertIn("memory budget", result["message"])
-        self.assertIsNotNone(processes[0].poll())
-        core.assert_called_with(
-            "DELETE", "codex_cli/browser_session", json={"session_id": "lease"}
-        )
-
-    def test_browser_memory_option_defaults_and_rejects_unbounded_values(self):
-        """Keep missing or malformed options bounded while accepting supported budgets."""
-        self.assertEqual(browser_memory_limit({}), DEFAULT_BROWSER_MEMORY_LIMIT_MIB)
-        for invalid in (None, True, False, 0, -1, 511, 8193, "2048", 2048.5):
-            self.assertEqual(
-                browser_memory_limit({"browser_memory_limit_mib": invalid}),
-                DEFAULT_BROWSER_MEMORY_LIMIT_MIB,
-            )
-        for limit in (512, 1536, 2048, 8192):
-            self.assertEqual(
-                browser_memory_limit({"browser_memory_limit_mib": limit}), limit
-            )
-
-    def test_browser_uses_configured_budget_for_each_capture(self):
-        """Apply lowered and raised budgets on successive captures without caching options."""
-        original_popen = subprocess.Popen
-
-        def launch(_args, **kwargs):
-            """Return a result after the memory guard has sampled the process."""
-            return original_popen(
-                [
-                    sys.executable,
-                    "-c",
-                    'import sys,time; sys.stdin.read(); time.sleep(.3); print(\'{"status":"issues","screenshots":[]}\')',
-                ],
-                **kwargs,
-            )
-
-        for limit, measured, status in (
-            (512, 600, "unavailable"),
-            (2048, 1600, "issues"),
-        ):
-            with self.subTest(limit=limit):
-                self.options["browser_memory_limit_mib"] = limit
-                with patch.object(
-                    self.engine,
-                    "core",
-                    return_value={
-                        "session_id": "lease",
-                        "url": "http://homeassistant:8123",
-                        "access_token": "private",
-                    },
-                ) as core:
-                    with (
-                        patch("verification.subprocess.Popen", side_effect=launch),
-                        patch(
-                            "verification.track_browser_processes",
-                            return_value=measured * 1024 * 1024,
-                        ),
-                    ):
-                        result = self.engine.run(
-                            "chat", {"operation": "dashboard", "path": "/lovelace/0"}
-                        )
-                self.assertEqual(result["status"], status)
-                if status == "unavailable":
-                    self.assertIn(f"{limit} MiB memory budget", result["message"])
-                    self.assertIn("Browser memory limit", result["message"])
-                else:
-                    self.assertEqual(result["memory_limit_mib"], limit)
-                    self.assertEqual(result["memory_peak_mib"], measured)
-                    self.assertNotIn("kiosk_screenshots", result)
-                core.assert_called_with(
-                    "DELETE", "codex_cli/browser_session", json={"session_id": "lease"}
-                )
-
-    @unittest.skipIf(os.name == "nt", "Linux container process accounting")
-    def test_memory_accounting_includes_swap_and_falls_back_if_pss_unavailable(self):
-        """Account for swapped pages and stay conservative without valid proportional data."""
-        with patch(
-            "verification.Path.read_text",
-            return_value="Rss: 2000 kB\nPss: 600 kB\nSwapPss: 100 kB\n",
-        ):
-            self.assertEqual(browser_process_memory(123, 500), 700 * 1024)
-        for content in ("Rss: 2000 kB\n", "Pss: invalid kB\n", "Pss: -1 kB\n"):
-            with patch("verification.Path.read_text", return_value=content):
-                self.assertEqual(
-                    browser_process_memory(123, 500), 500 * os.sysconf("SC_PAGE_SIZE")
-                )
-        with patch("verification.Path.read_text", side_effect=PermissionError):
-            self.assertEqual(
-                browser_process_memory(123, 500), 500 * os.sysconf("SC_PAGE_SIZE")
-            )
-
-    @unittest.skipIf(os.name == "nt", "Linux shared-memory accounting")
-    def test_shared_browser_pages_are_not_charged_twice(self):
-        """Use real shared pages to distinguish proportional accounting from summed RSS."""
-        script = "import os,time; shared=bytearray(64*1024*1024); child=os.fork(); print('ready',flush=True); time.sleep(60)"
-        process = subprocess.Popen(
-            [sys.executable, "-c", script],
-            stdout=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-        tracked = {}
-        try:
-            self.assertEqual(process.stdout.readline().strip(), "ready")
-            self.assertEqual(process.stdout.readline().strip(), "ready")
-            memory = track_browser_processes(process.pid, tracked)
-            self.assertEqual(len(tracked), 2)
-            rss = sum(
-                int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[21])
-                for pid in tracked
-            ) * os.sysconf("SC_PAGE_SIZE")
-            self.assertGreater(memory, 64 * 1024 * 1024)
-            self.assertLess(memory, rss - 32 * 1024 * 1024)
-        finally:
-            kill_tracked_processes(tracked)
-            process.kill() if process.poll() is None else None
-            process.wait(timeout=5)
-            process.stdout.close()
-
-    @unittest.skipIf(os.name == "nt", "Linux container process accounting")
-    def test_tracks_and_stops_detached_browser_descendants(self):
-        """Track a browser descendant that started its own session, so it is measured and can be stopped."""
-        script = "import subprocess,sys,time; subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],start_new_session=True); time.sleep(60)"
-        process = subprocess.Popen(
-            [sys.executable, "-c", script], start_new_session=True
-        )
-        tracked = {}
-        try:
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                memory = track_browser_processes(process.pid, tracked)
-                if len(tracked) >= 2:
-                    break
-                time.sleep(0.05)
-            self.assertGreaterEqual(len(tracked), 2)
-            self.assertGreater(memory, 0)
-        finally:
-            kill_tracked_processes(tracked)
-            process.kill() if process.poll() is None else None
-            process.wait(timeout=5)
 
     def test_pending_dashboard_cannot_save_unrelated_or_unvalidated_files(self):
         """Refuse to save a pending dashboard in read-only mode, with auto-save off, or without a turn baseline."""
@@ -776,12 +274,8 @@ class VerificationTests(unittest.TestCase):
         """Find the default dashboard in .storage/lovelace when that file changed."""
         path = self.config / ".storage" / "lovelace"
         path.parent.mkdir()
-        path.write_text(
-            json.dumps({"data": {"config": {"views": [{"title": "Home"}]}}})
-        )
-        refs = server.find_lovelace_dashboard_refs(
-            {"added": [], "changed": [".storage/lovelace"]}
-        )
+        path.write_text(json.dumps({"data": {"config": {"views": [{"title": "Home"}]}}}))
+        refs = server.find_lovelace_dashboard_refs({"added": [], "changed": [".storage/lovelace"]})
         self.assertEqual(refs[0]["storage_file"], ".storage/lovelace")
 
     def test_expired_screenshot_is_deleted_but_other_images_remain(self):
@@ -796,3 +290,46 @@ class VerificationTests(unittest.TestCase):
         self.engine.cleanup()
         self.assertFalse((root / "expired.png").exists())
         self.assertTrue((root / "user.png").exists())
+
+
+class WorkerInterfaceTests(unittest.TestCase):
+    """VerificationWorker lists exactly what verification.py reads from the worker, and server.py has each name."""
+
+    def setUp(self):
+        """Collect the names of the interface and the names that the module reads from `self.worker`."""
+        tree = ast.parse(Path(verification.__file__).read_text(encoding="utf-8"))
+        interface = next(node for node in tree.body
+                         if isinstance(node, ast.ClassDef) and node.name == "VerificationWorker")
+        self.methods = {node.name for node in interface.body if isinstance(node, ast.FunctionDef)}
+        self.values = {node.target.id for node in interface.body if isinstance(node, ast.AnnAssign)}
+        self.used = {node.attr for node in ast.walk(tree)
+                     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+                     and node.value.attr == "worker" and isinstance(node.value.value, ast.Name)
+                     and node.value.value.id == "self"}
+
+    def test_the_interface_lists_each_name_that_the_module_reads_and_no_other(self):
+        """A new use of the worker must be added to the interface; a name no longer used must leave it."""
+        self.assertEqual(self.used, self.methods | self.values)
+
+    def test_the_worker_has_each_listed_name(self):
+        """server.py defines each method as a function and each value as a module global."""
+        for name in self.methods:
+            self.assertTrue(inspect.isfunction(getattr(server, name, None)), name)
+        for name in self.values:
+            self.assertTrue(hasattr(server, name), name)
+
+    def test_each_listed_method_takes_the_arguments_that_the_worker_takes(self):
+        """A method of the interface and the function in server.py have the same parameters and return type.
+
+        The worker function may take more keyword-only parameters with defaults; the module does not pass them.
+        """
+        for name in sorted(self.methods):
+            declared = inspect.signature(getattr(verification.VerificationWorker, name))
+            actual = inspect.signature(getattr(server, name))
+            wanted = [str(parameter) for key, parameter in declared.parameters.items() if key != "self"]
+            extra = [parameter for key, parameter in actual.parameters.items() if key not in declared.parameters]
+            kept = [str(parameter) for key, parameter in actual.parameters.items() if key in declared.parameters]
+            self.assertEqual(wanted, kept, name)
+            self.assertTrue(all(parameter.kind is parameter.KEYWORD_ONLY and parameter.default is not parameter.empty
+                                for parameter in extra), name)
+            self.assertEqual(str(declared.return_annotation), str(actual.return_annotation), name)

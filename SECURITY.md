@@ -2,26 +2,13 @@
 
 Codex for Home Assistant can read and modify a Home Assistant configuration folder. Please treat security and privacy issues with care.
 
-Dashboard verification uses a dedicated local identity, temporary credentials,
-restricted HTTP/WebSocket requests, and private screenshot attachments. The browser
-shares the app's container and filesystem and runs without Chromium's own sandbox;
-this is not complete isolation from the AI process or root access. Known credential
-files are excluded from backups and snapshots, but inline secrets and old snapshots
-need separate care. See [verification security and retention](codex-cli-worker/VERIFICATION.md).
-
-Dashboard rendering can fetch supported public HTTPS scripts, styles, fonts, and
-images through a separate client without Home Assistant credentials or browser
-cookies. The client validates and pins public DNS addresses and rechecks redirects.
-External servers still see the host's public IP and resource URL. Installed custom
-cards remain trusted code with access to dashboard data. The browser blocks
-service calls and writes; an explicit `save_pending` verification request can
-save a dashboard edited during the task when auto-save is enabled and the task
-mode permits writes. See [resource policy and limits](codex-cli-worker/VERIFICATION.md#dashboard-resources).
-
-Dashboard inspections can also fetch screenshots from matching Fully Kiosk
-devices through the paired integration. These images have the same authenticated
-access and retention as browser screenshots. No device navigation, refresh, or
-wake action is performed. See [Fully Kiosk screenshots](codex-cli-worker/VERIFICATION.md#fully-kiosk-screenshots).
+Codex's checks of Home Assistant (entity state, the configuration check, Core logs and dashboard readback) run
+through the worker with its automatic Supervisor token; the app creates no Home Assistant user. Core log reads
+need both an administrator token and the paired worker token, and read only Core's logs. Known credential files
+are excluded from backups and snapshots, but inline secrets and old snapshots need separate care. See
+[verification security](codex-cli-worker/VERIFICATION.md). Version 0.4.0 removed the dashboard browser and its
+**Dashboard verification** user; the integration removes that user the first time it sets up
+with the worker.
 
 SSH connections use user-managed keys and server permissions. Keys stored under
 `/data/.ssh` are accessible to Codex tasks and are excluded from app backups;
@@ -32,12 +19,12 @@ Codex's own reviewer answer. Full access runs without the sandbox and asks
 nothing; it is off until an administrator turns it on in the app's Settings, and
 the `codex_sandbox` option does not accept it. Review each approved command and
 keep connections short-lived. See [SSH setup and
-limits](codex-cli-worker/DOCS.md#ssh-connections).
+limits](docs/app-reference.md#ssh-connections).
 
 From 0.3.6 the app has no command check of its own: Codex's permission modes and the
 sandbox are the protection. A command you allow once runs outside the sandbox and can
 read private files or change the app's settings, and the app does not scan what Codex
-writes in `/config`. Read each permission card before you allow it.
+writes in `/homeassistant`. Read each permission card before you allow it.
 
 To check these protections in the code, see [AUDITING.md](AUDITING.md).
 
@@ -74,8 +61,9 @@ Please use extra care when changing or reviewing:
 - Codex CLI authentication and logout behavior.
 - Worker API token generation, storage, rotation, or validation.
 - Home Assistant Ingress validation.
-- Home Assistant Supervisor or Core API calls.
-- File reads and writes under `/config`.
+- Home Assistant Supervisor or Core API calls, including the bundled Home Assistant MCP server (`hass_mcp.py`,
+  `hass_mcp_launch.py`), which holds the Supervisor token and must never pass it to a command Codex runs.
+- File reads and writes under `/homeassistant`.
 - Task execution, cancellation, user replies, and task logs.
 - AppArmor, container permissions, networking, mounted paths, and app/add-on configuration.
 

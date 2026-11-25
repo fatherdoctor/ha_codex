@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import logging
-import math
-import re
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import CodexCliApiClient, CodexCliApiError, CodexCliAuthError
@@ -28,6 +25,16 @@ _LOGGER = logging.getLogger(__name__)
 
 ISSUE_NOT_SIGNED_IN = "codex_not_signed_in"
 ISSUE_REMOTE_CONTROL_CHANGE = "remote_control_config_change"
+# Every repair issue the coordinator raises. They are not tied to the config entry, so unload and removal delete
+# them: an owner who removes the integration must not keep a "sign in" repair.
+REPAIR_ISSUES = (ISSUE_NOT_SIGNED_IN, ISSUE_REMOTE_CONTROL_CHANGE, ISSUE_GITHUB_ACCESS_LOST)
+
+
+def async_delete_repair_issues(hass: HomeAssistant) -> None:
+    """Delete every repair issue this integration raises."""
+    for issue_id in REPAIR_ISSUES:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+
 GITHUB_STATE_WORDS = {
     "near_expiry": "expires within 7 days",
     "expired": "expired",
@@ -40,18 +47,12 @@ GITHUB_STATE_WORDS = {
 def github_repair_key(state: str, kind: str) -> str:
     """Return the Repair's translation key: what still works and the next step differ by state and sign-in kind.
 
-    Connect again on the page starts a GitHub App sign-in, so a token connection is sent to the token form.
+    Sign in on the page starts a GitHub App sign-in, so a token connection is sent to the token form.
     """
     if state == "near_expiry":
-        return (
-            "github_access_near_expiry_token"
-            if kind == "token"
-            else "github_access_near_expiry"
-        )
+        return "github_access_near_expiry_token" if kind == "token" else "github_access_near_expiry"
     if state in ("expired", "revoked"):
-        return (
-            "github_access_lost_token" if kind == "token" else ISSUE_GITHUB_ACCESS_LOST
-        )
+        return "github_access_lost_token" if kind == "token" else ISSUE_GITHUB_ACCESS_LOST
     if state == "access_changed":
         return "github_access_changed"
     return "github_access_check_failed"
@@ -68,9 +69,7 @@ def _expiry_date(value: Any) -> str:
 class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Poll the local Codex CLI Worker."""
 
-    def __init__(
-        self, hass: HomeAssistant, client: CodexCliApiClient, entry_id: str = "default"
-    ) -> None:
+    def __init__(self, hass: HomeAssistant, client: CodexCliApiClient) -> None:
         """Set up polling of the worker status through the given client, every DEFAULT_SCAN_INTERVAL_SECONDS."""
         super().__init__(
             hass,
@@ -79,15 +78,13 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL_SECONDS),
         )
         self.client = client
-        self._mailbox_key = f"{DOMAIN}_mailbox_seen_{entry_id}"
-        self._mailbox_store = Store(hass, 1, self._mailbox_key, atomic_writes=True)
-        self._mailbox_seen: set[str] | None = None
         self._github_state: str | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch the worker status and update the sign-in repair issue.
 
-        Rejected worker authentication raises ConfigEntryAuthFailed; any other failure raises UpdateFailed.
+        Rejected worker authentication raises ConfigEntryAuthFailed and any other worker error raises UpdateFailed;
+        the base class handles an unexpected one.
         """
         try:
             data = await self.client.status()
@@ -95,85 +92,17 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ConfigEntryAuthFailed("Worker authentication failed") from exc
         except CodexCliApiError as exc:
             raise UpdateFailed(str(exc)) from exc
-        except Exception as exc:
-            raise UpdateFailed(f"Unexpected worker status error: {exc}") from exc
 
-        await self._async_update_mailbox(data)
         self._update_repair_issue(data)
         self._update_remote_control_issue(data)
         self._update_github_issue(data)
         return data
 
-    async def _async_update_mailbox(self, data: dict[str, Any]) -> None:
-        """Persist deduplication before emitting body-free arrival events."""
-        mailbox = data.get("mailbox")
-        if not isinstance(mailbox, dict) or mailbox.get("available") is False:
-            return
-        rows = mailbox.get("messages")
-        if not isinstance(rows, list) or len(rows) > 500:
-            return
-        events = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                return
-            message_id, thread_id = row.get("message_id"), row.get("thread_id")
-            author, timestamp = row.get("author"), row.get("time")
-            if (
-                not isinstance(message_id, str)
-                or not re.fullmatch(r"[0-9a-f]{32}", message_id)
-                or not isinstance(thread_id, str)
-                or not re.fullmatch(r"[0-9a-f]{32}", thread_id)
-                or author not in ("codex", "lead", "owner")
-                or type(timestamp) not in (int, float)
-                or not math.isfinite(timestamp)
-                or timestamp < 0
-            ):
-                return  # A partial/malformed snapshot must not reset deduplication.
-            # Copy only this allowlist, even if a future worker adds body fields.
-            events[message_id] = {
-                "message_id": message_id,
-                "thread_id": thread_id,
-                "author": author,
-                "time": timestamp,
-            }
-        if self._mailbox_seen is None:
-            saved = await self._mailbox_store.async_load()
-            self._mailbox_seen = (
-                set(saved)
-                if isinstance(saved, list) and all(isinstance(v, str) for v in saved)
-                else set()
-            )
-        current = set(events)
-        fresh = current - self._mailbox_seen
-        if current != self._mailbox_seen:
-            # HA consumes some write errors inside async_save. Read through a new
-            # Store (not the writer's pending data) before treating IDs as saved.
-            # Saving invalidates HA's shared preload cache, so this reads the file.
-            expected = sorted(current)
-            try:
-                await self._mailbox_store.async_save(expected)
-                saved = await Store(self.hass, 1, self._mailbox_key).async_load()
-            except (HomeAssistantError, OSError, ValueError):
-                saved = None
-            if saved != expected:
-                _LOGGER.warning(
-                    "Mailbox arrival events deferred: saved IDs could not be verified"
-                )
-                return  # Keep the previous set so the next poll retries the save.
-            self._mailbox_seen = current
-        for message_id, event in events.items():
-            if message_id in fresh:
-                self.hass.bus.async_fire("codex_cli_mailbox_message", event)
-
     def _update_repair_issue(self, data: dict[str, Any]) -> None:
         """Create a repair issue if Codex CLI needs sign-in."""
         login = data.get("codex_login") or {}
         access = data.get("account_access")
-        needs_sign_in = (
-            access.get("needs_sign_in")
-            if isinstance(access, dict)
-            else not login.get("status_ok")
-        )
+        needs_sign_in = access.get("needs_sign_in") if isinstance(access, dict) else not login.get("status_ok")
         if needs_sign_in is not True:
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_NOT_SIGNED_IN)
             return
@@ -231,33 +160,14 @@ class CodexCliCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if previous is not None and previous != state:
             # The worker fires the same event through the Core API; this copy, marked by its source, still
             # reaches house automations when that call failed. Names only, never a token.
-            self.hass.bus.async_fire(
-                EVENT_GITHUB_ACCESS,
-                {
-                    "state": state,
-                    "previous_state": previous,
-                    "reason": reason,
-                    "account": login,
-                    "missing": [
-                        str(item)
-                        for item in github.get("missing") or []
-                        if isinstance(item, str)
-                    ][:50],
-                    "extra": [
-                        str(item)
-                        for item in github.get("extra") or []
-                        if isinstance(item, str)
-                    ][:50],
-                    "permission_problem": github.get("permission_problem")
-                    if isinstance(github.get("permission_problem"), str)
-                    else None,
-                    "expires_at": github.get("expires_at")
-                    if isinstance(github.get("expires_at"), str)
-                    else None,
-                    "addon": "codex_cli_worker",
-                    "source": "integration",
-                },
-            )
+            self.hass.bus.async_fire(EVENT_GITHUB_ACCESS, {
+                "state": state, "previous_state": previous, "reason": reason, "account": login,
+                "missing": [str(item) for item in github.get("missing") or [] if isinstance(item, str)][:50],
+                "extra": [str(item) for item in github.get("extra") or [] if isinstance(item, str)][:50],
+                "permission_problem": github.get("permission_problem") if isinstance(github.get("permission_problem"), str) else None,
+                "expires_at": github.get("expires_at") if isinstance(github.get("expires_at"), str) else None,
+                "addon": "codex_cli_worker", "source": "integration",
+            })
         if state in GITHUB_ERROR_STATES:
             severity = ir.IssueSeverity.ERROR
         elif state in GITHUB_WARNING_STATES:

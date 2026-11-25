@@ -1,9 +1,9 @@
 """Stdio MCP bridge for the home_assistant_call tool: one Home Assistant action per call.
 
 The tool is registered with the approval mode "prompt", so Codex asks the person before each call.
-This bridge only forwards the request to the worker's socket, with the chat's thread id that Codex sent
-with the call. Under remote control it sends the relay's key (HA_CALL_CAPABILITY) in its place. The worker
-checks the chat or the key, and the form of the request (ha_call.py).
+This bridge only forwards the request to the worker's socket, with the thread id that Codex sent with the
+call. Under remote control the relay sets HA_CALL_SOCKET to the app's own socket. The worker checks the chat
+(or, on the app's socket, that the relay runs) and the form of the request (ha_call.py).
 """
 
 from __future__ import annotations
@@ -19,13 +19,16 @@ TOOL = {
     "name": "call",
     "title": "Home Assistant action",
     "description": (
-        "Send one Home Assistant action (a service call) that changes the house, for example light.turn_off, "
-        "automation.reload or homeassistant.restart. Codex asks the person before each call. "
+        "Send one Home Assistant action (a service call): one that changes the house, for example light.turn_off, "
+        "automation.reload or homeassistant.restart, or one that answers with data, for example calendar.get_events, "
+        "weather.get_forecasts or todo.get_items. Codex asks the person before each call. "
         "Put entity_id, device_id, area_id, floor_id or label_id in target, and the other fields in data. "
         "For a device the person named, give name (their words) in place of target: the action is sent only "
         "when exactly one entity of the service's domain fits, else the answer lists the candidates. "
         "When target is only entity ids, the answer reads back the new state of the first 5 of them; "
-        "for other targets, or more entities, read the state with a read tool."
+        "for other targets, or more entities, read the state with a read tool. "
+        "An action that answers with data returns it in response. Use this tool for those actions, not "
+        "home_assistant_mcp's call_service_tool, which cannot return their data."
     ),
     "inputSchema": {
         "type": "object",
@@ -80,10 +83,8 @@ MAX_REQUEST_BYTES = 65536
 
 
 def call(arguments, thread_id):
-    """Forward the arguments, and the chat's thread id or the relay's key, to the worker once; return its answer."""
-    relay_key = os.environ.get("HA_CALL_CAPABILITY")
-    origin = {"capability": relay_key} if relay_key else {"thread_id": thread_id}
-    encoded = json.dumps({**origin, "arguments": arguments}).encode() + b"\n"
+    """Forward the arguments and the call's thread id to the worker once; return its answer."""
+    encoded = json.dumps({"thread_id": thread_id, "arguments": arguments}).encode() + b"\n"
     if len(encoded) > MAX_REQUEST_BYTES:
         raise ValueError("Call request is too large")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:

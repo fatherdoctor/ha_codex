@@ -2,7 +2,7 @@
 
 Off by default. When it is on, a chat whose permission mode is Full access runs
 Codex as the ChatGPT app's Full access does: the danger-full-access sandbox and
-the "never" approval policy (policy.MODES). Its commands reach /config, the
+the "never" approval policy (policy.MODES). Its commands reach /homeassistant, the
 network and everything the app's container can reach, with no sandbox around
 them, and Codex does not ask before it runs them. The switch is a warning the
 owner confirms, not a grant layer: it adds no rule to any mode.
@@ -37,7 +37,7 @@ IMAGE_REQUIREMENTS = Path("/usr/share/ha_codex/requirements.toml")
 # id, so a setting saved under an older warning is off until confirmed again.
 WARNING_ID = "full-access-warning-2"
 WARNING = (
-    "Full access runs Codex's commands outside the sandbox. They can read and change everything in /config, "
+    "Full access runs Codex's commands outside the sandbox. They can read and change everything in /homeassistant, "
     "use the network, and reach everything this app's container can reach, without asking first. "
     "Turn it on only if you accept that risk."
 )

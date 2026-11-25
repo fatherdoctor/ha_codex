@@ -1,7 +1,7 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-mkdir -p /data/codex-home /config/codex_tasks
+mkdir -p /data/codex-home /data/codex_tasks
 export CODEX_HOME=/data/codex-home
 export HOME=/data
 export PYTHONDONTWRITEBYTECODE=1
@@ -42,7 +42,7 @@ if [ ! -e "${pin_marker}" ]; then
     fi
 fi
 
-# Install or update the bundled Codex integration in /config (integration_sync.py); never blocks the start.
+# Install or update the bundled Codex integration in /homeassistant (integration_sync.py); never blocks the start.
 python3 /integration_sync.py || bashio::log.warning "The integration install step failed; the worker starts anyway."
 # Announce the app through Supervisor discovery once Home Assistant has loaded the integration. It runs in the
 # background because, after a fresh install, that happens only when the owner restarts Home Assistant.

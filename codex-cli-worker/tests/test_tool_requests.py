@@ -10,24 +10,23 @@ n/a: quotes, comments, line ends, multiline, wrappers, separators, git shapes, t
 compared whole against ids that the worker itself bound, and no shell, YAML or template reads it.
 Add a case to CORPUS below.
 """
-
-from contextlib import redirect_stdout
 import io
-from pathlib import Path
+from contextlib import redirect_stdout
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from test_server import server
 import approvals
 import github_access
-from ha_call import RELAY_TASK, HomeAssistantCall
 import ha_call_mcp
-from ha_data import DataError, HomeAssistantData
 import ha_data_mcp
 import tool_threads
-from verification import Verification
 import verification_mcp
+from ha_call import RELAY_TASK, HomeAssistantCall, RelayCall
+from ha_data import DataError, HomeAssistantData
+from verification import Verification
 
 CHAT = "1a1b1c1d-2e2f-4333-8444-555555555555"
 OTHER = "66666666-7777-4888-9999-aaaaaaaaaaaa"
@@ -36,12 +35,7 @@ CHILD = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
 # (id, value, expected: "allow" or "refuse", family)
 CORPUS = [
     ("T01", CHAT, "allow", "form"),
-    (
-        "T02",
-        "00000000-0000-0000-0000-000000000000",
-        "refuse",
-        "form",
-    ),  # well formed, not bound
+    ("T02", "00000000-0000-0000-0000-000000000000", "refuse", "form"),  # well formed, not bound
     ("T03", None, "refuse", "empty"),
     ("T04", "", "refuse", "empty"),
     ("T05", " ", "refuse", "empty"),
@@ -79,11 +73,8 @@ class ToolThreadsCorpus(unittest.TestCase):
     def test_corpus(self):
         chats = tool_threads.ChatThreads()
         chats.bind("chat", CHAT)
-        wrong = [
-            case
-            for case, value, expected, _family in CORPUS
-            if (chats.task_for(value) == "chat") != (expected == "allow")
-        ]
+        wrong = [case for case, value, expected, _family in CORPUS
+                 if (chats.task_for(value) == "chat") != (expected == "allow")]
         self.assertEqual(wrong, [], "corpus cases with the wrong answer")
 
     def test_only_the_meta_of_the_call_counts(self):
@@ -109,10 +100,7 @@ class ToolThreadsCorpus(unittest.TestCase):
         chats.bind("a", CHILD)
         chats.bind("b", OTHER)
         chats.release("a")
-        self.assertEqual(
-            [chats.task_for(CHAT), chats.task_for(CHILD), chats.task_for(OTHER)],
-            [None, None, "b"],
-        )
+        self.assertEqual([chats.task_for(CHAT), chats.task_for(CHILD), chats.task_for(OTHER)], [None, None, "b"])
 
     def test_only_a_thread_id_form_can_be_bound(self):
         chats = tool_threads.ChatThreads()
@@ -142,11 +130,8 @@ class BridgesSendTheThreadId(unittest.TestCase):
             sent["args"] = args
             return {"status": "observed"}
 
-        request = {
-            "method": "tools/call",
-            "id": 1,
-            "params": {"name": name, "arguments": {}, "_meta": {"threadId": CHAT}},
-        }
+        request = {"method": "tools/call", "id": 1,
+                   "params": {"name": name, "arguments": {}, "_meta": {"threadId": CHAT}}}
         with patch.object(module, function, capture):
             module.respond(request)
         return sent["args"]
@@ -154,47 +139,33 @@ class BridgesSendTheThreadId(unittest.TestCase):
     def test_verification_and_data_and_call_bridges(self):
         self.assertEqual(self.call(verification_mcp, "verify", "verify")[-1], CHAT)
         self.assertEqual(self.call(ha_data_mcp, "fetch", "history")[-1], CHAT)
-        with patch.dict("os.environ", {}, clear=False) as environment:
-            environment.pop("HA_CALL_CAPABILITY", None)
-            self.assertEqual(self.call(ha_call_mcp, "call", "call")[-1], CHAT)
+        self.assertEqual(self.call(ha_call_mcp, "call", "call")[-1], CHAT)
 
-    def test_the_call_bridge_sends_the_key_only_under_remote_control(self):
+    def test_the_call_bridge_sends_no_key_and_uses_the_socket_it_is_given(self):
         sent = []
 
         class Socket:
-            def __init__(self, *args):
-                pass
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def settimeout(self, value):
-                pass
-
-            def connect(self, path):
-                pass
-
-            def sendall(self, data):
-                sent.append(data)
-
+            def __init__(self, *args): pass
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def settimeout(self, value): pass
+            def connect(self, path): sent.append(path)
+            def sendall(self, data): sent.append(data)
             def makefile(self, mode):
                 import io
-
                 return io.BytesIO(b'{"status": "refused"}\n')
 
         with patch.object(ha_call_mcp.socket, "socket", Socket):
-            with patch.dict("os.environ", {"HA_CALL_CAPABILITY": "relay-key"}):
+            with patch.dict("os.environ", {"HA_CALL_SOCKET": "/synthetic/app.sock", "HA_CALL_CAPABILITY": "old-key"}):
                 ha_call_mcp.call({}, CHAT)
             with patch.dict("os.environ", {}) as environment:
-                environment.pop("HA_CALL_CAPABILITY", None)
+                environment.pop("HA_CALL_SOCKET", None)
                 ha_call_mcp.call({}, CHAT)
-        self.assertIn(b'"capability": "relay-key"', sent[0])
-        self.assertNotIn(CHAT.encode(), sent[0])
-        self.assertIn(('"thread_id": "%s"' % CHAT).encode(), sent[1])
-        self.assertNotIn(b"capability", sent[1])
+        self.assertEqual(sent[0], "/synthetic/app.sock")
+        self.assertEqual(sent[2], "/data/ha-call.sock")
+        for request in (sent[1], sent[3]):
+            self.assertIn(('"thread_id": "%s"' % CHAT).encode(), request)
+            self.assertNotIn(b"capability", request)
 
 
 class TwoChats(unittest.TestCase):
@@ -204,33 +175,22 @@ class TwoChats(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        for key, value in {
-            "DATA_ROOT": self.root,
-            "TASK_STATE_FILE": self.root / "index.json",
-            "tasks": {},
-        }.items():
+        patcher = patch.dict(server.tasks, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key, value in {"DATA_ROOT": self.root, "TASK_STATE_FILE": self.root / "index.json"}.items():
             patcher = patch.object(server, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)
-        patcher = patch.object(
-            server,
-            "read_options",
-            return_value={
-                **server.DEFAULT_OPTIONS,
-                "task_root": str(self.root / "tasks"),
-            },
-        )
+        patcher = patch.object(server, "read_options", return_value={**server.DEFAULT_OPTIONS,
+                                                                       "task_root": str(self.root / "tasks")})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.data = HomeAssistantData(server, self.root / "ha-data")
         self.checks = Verification(server)
-        self.calls = HomeAssistantCall(server, relay_running=lambda: True)
+        self.calls = HomeAssistantCall(server)
         for task_id, thread_id in (("a", CHAT), ("b", OTHER)):
-            server.tasks[task_id] = {
-                "task_id": task_id,
-                "status": "running",
-                "current_turn_id": "turn-" + task_id,
-            }
+            server.tasks[task_id] = {"task_id": task_id, "status": "running", "current_turn_id": "turn-" + task_id}
             tool_threads.CHATS.bind(task_id, thread_id)
             self.addCleanup(tool_threads.CHATS.release, task_id)
             self.data.begin(task_id)
@@ -239,18 +199,14 @@ class TwoChats(unittest.TestCase):
         self.calls.begin("a")  # a person attends chat a; chat b is a scheduled run
 
     def info(self, thread_id):
-        return self.data.dispatch(
-            {"operation": "exchange_info", "thread_id": thread_id}
-        )
+        return self.data.dispatch({"operation": "exchange_info", "thread_id": thread_id})
 
 
 class ModulesFindTheChat(TwoChats):
     """The three checks of the design, section 6, in each module that answers a tool request."""
 
     def info(self, thread_id):
-        return self.data.dispatch(
-            {"operation": "exchange_info", "thread_id": thread_id}
-        )
+        return self.data.dispatch({"operation": "exchange_info", "thread_id": thread_id})
 
     def refused_everywhere(self, thread_id):
         """Return the modules that did not refuse a request with this thread id."""
@@ -304,112 +260,70 @@ class ModulesFindTheChat(TwoChats):
         self.assertEqual(self.data.queries["b"], 0)
         self.assertEqual(self.data.exchange_for(OTHER)[0], "b")
 
-    def test_the_call_tool_needs_a_person_at_that_chat(self):
+    def test_the_call_tool_needs_a_running_exchange_of_that_chat(self):
         self.assertEqual(self.calls.task_for({"thread_id": CHAT, "arguments": {}}), "a")
         self.assertIsNone(self.calls.task_for({"thread_id": OTHER, "arguments": {}}))
-        answer = self.calls.dispatch(
-            {"thread_id": OTHER, "arguments": {"service": "light.turn_off"}}
-        )
+        answer = self.calls.dispatch({"thread_id": OTHER, "arguments": {"service": "light.turn_off"}})
         self.assertEqual(answer["status"], "unavailable")
 
-    def test_remote_control_requests_use_the_relay_key_only(self):
-        relay_key = self.calls.begin(RELAY_TASK)
-        chat_value = self.calls.capabilities["a"]
-        self.assertEqual(
-            self.calls.task_for({"capability": relay_key, "arguments": {}}), RELAY_TASK
-        )
-        # A key never resolves to a chat, even with the chat's thread id beside it.
-        self.assertIsNone(
-            self.calls.task_for(
-                {"capability": chat_value, "thread_id": CHAT, "arguments": {}}
-            )
-        )
-        self.assertIsNone(
-            self.calls.task_for({"capability": "", "thread_id": CHAT, "arguments": {}})
-        )
-        self.assertIsNone(
-            self.calls.task_for({"capability": [relay_key], "arguments": {}})
-        )
-        # The relay key with a chat's thread id is still the relay, never the chat.
-        self.assertEqual(
-            self.calls.task_for(
-                {"capability": relay_key, "thread_id": CHAT, "arguments": {}}
-            ),
-            RELAY_TASK,
-        )
-        self.calls.relay_running = lambda: False
-        self.assertIsNone(
-            self.calls.task_for({"capability": relay_key, "arguments": {}})
-        )
+    def test_the_socket_not_a_key_says_who_asks(self):
+        # The chat socket answers only a running chat's thread; nothing on it is ever the relay's.
+        for payload in ({"arguments": {}}, {"capability": "invented-key", "arguments": {}},
+                        {"thread_id": RELAY_TASK, "arguments": {}}):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self.calls.task_for(payload))
+        self.assertEqual(self.calls.task_for({"capability": "invented-key", "thread_id": CHAT, "arguments": {}}), "a")
+        # The app's socket answers while the relay runs, and never names a chat, even with a chat's thread id.
+        running = [True]
+        relay = RelayCall(server, relay_running=lambda: running[0])
+        self.assertEqual(relay.task_for({"thread_id": CHAT, "arguments": {}}), RELAY_TASK)
+        running[0] = False
+        self.assertIsNone(relay.task_for({"thread_id": CHAT, "arguments": {}}))
 
     def test_a_scheduling_request_needs_the_thread_id(self):
         with patch.object(server, "ha_data", self.data):
             with self.assertRaises(ValueError):
-                server.schedule_service.dispatch(
-                    {
-                        "operation": "list_schedules",
-                        "arguments": {},
-                        "capability": self.data.capabilities["a"],
-                    }
-                )
+                server.schedule_service.dispatch({"operation": "list_schedules", "arguments": {},
+                                                  "capability": self.data.capabilities["a"]})
             with self.assertRaisesRegex(ValueError, "ended"):
-                server.schedule_service.dispatch(
-                    {
-                        "operation": "list_schedules",
-                        "arguments": {},
-                        "thread_id": "00000000-0000-0000-0000-000000000000",
-                    }
-                )
+                server.schedule_service.dispatch({"operation": "list_schedules", "arguments": {},
+                                                  "thread_id": "00000000-0000-0000-0000-000000000000"})
 
 
 class TheChatHoldsNoKey(unittest.TestCase):
-    """No HA_*_CAPABILITY name in the chat's Codex command line; remote control keeps its own."""
+    """No tool key in the chat's Codex command line or in remote control's (D-CX-KEYS)."""
 
     def test_the_chat_command_line(self):
-        for attended in (True, False):
-            text = " ".join(server.build_app_server_args(attended))
-            self.assertNotIn("CAPABILITY", text)
-            self.assertNotIn("shell_environment_policy", text)
+        text = " ".join(server.build_app_server_args())
+        self.assertNotIn("CAPABILITY", text)
+        self.assertNotIn("shell_environment_policy", text)
 
-    def test_remote_control_keeps_its_keys(self):
-        text = " ".join(server.relay_tool_args())
+    def test_remote_control_holds_no_tool_key(self):
+        with patch.object(server, "read_options", return_value={}):
+            text = " ".join(server.relay_tool_args())
+        # The exclude stays for the hass-mcp token (HA_MCP_CAPABILITY), which only that server gets.
         self.assertIn("shell_environment_policy.exclude", text)
-        self.assertIn(
-            'mcp_servers.home_assistant_call.env_vars=["HA_CALL_CAPABILITY"]', text
-        )
+        self.assertIn('mcp_servers.home_assistant_call.env_vars=["HA_CALL_SOCKET"]', text)
+        self.assertNotIn("HA_CALL_CAPABILITY", text)
+        self.assertNotIn("HA_RELAY_CAPABILITY", text)
 
     def test_run_task_puts_no_key_in_the_environment(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
-        body = source[
-            source.index("def run_task(") : source.index("def _run_background_task(")
-        ]
+        # The exchange's stages (preflight, launch, run_task) sit between these two lines of server.py.
+        body = source[source.index("class Cancelled("):source.index("def _run_background_task(")]
         self.assertNotIn("_CAPABILITY", body)
         self.assertIn("env=codex_env(),", body)
 
 
 # The collab tools in which the model writes the receiver (CollabAgentTool, app-server-protocol at rust-v0.166.0).
-MODEL_TARGETED_TOOLS = (
-    "sendInput",
-    "wait",
-    "closeAgent",
-    "resumeAgent",
-    "sendMessage",
-    "followupTask",
-    "interruptAgent",
-    "listAgents",
-)
+MODEL_TARGETED_TOOLS = ("sendInput", "wait", "closeAgent", "resumeAgent", "sendMessage", "followupTask",
+                        "interruptAgent", "listAgents")
 
 
 def collab_item(tool, receivers, sender=CHAT):
     """Return a collabAgentToolCall item as the app server sends it."""
-    return {
-        "id": "1",
-        "type": "collabAgentToolCall",
-        "tool": tool,
-        "status": "completed",
-        "senderThreadId": sender,
-        "receiverThreadIds": receivers,
-    }
+    return {"id": "1", "type": "collabAgentToolCall", "tool": tool, "status": "completed",
+            "senderThreadId": sender, "receiverThreadIds": receivers}
 
 
 class SubAgentThreads(unittest.TestCase):
@@ -423,18 +337,12 @@ class SubAgentThreads(unittest.TestCase):
 
     def test_the_spawn_item_reports_the_sub_agent_threads(self):
         events = []
-        self.session(events)._item(
-            "item/completed", collab_item("spawnAgent", [CHILD, 5])
-        )
-        self.assertEqual(
-            events, [{"type": "agent.threads", "parent": CHAT, "threads": [CHILD]}]
-        )
+        self.session(events)._item("item/completed", collab_item("spawnAgent", [CHILD, 5]))
+        self.assertEqual(events, [{"type": "agent.threads", "parent": CHAT, "threads": [CHILD]}])
 
     def test_r10_another_thread_spawn_is_not_reported(self):
         events = []
-        self.session(events)._item(
-            "item/completed", collab_item("spawnAgent", [CHILD], sender=OTHER)
-        )
+        self.session(events)._item("item/completed", collab_item("spawnAgent", [CHILD], sender=OTHER))
         self.assertEqual(events, [])
 
     def test_r1_r2_a_model_written_receiver_is_not_reported(self):
@@ -449,16 +357,9 @@ class SubAgentThreads(unittest.TestCase):
         events = []
         session = self.session(events)
         session._item("item/started", collab_item("spawnAgent", [CHILD]))
-        for item in (
-            {**collab_item("spawnAgent", [CHILD]), "tool": None},
-            {
-                key: value
-                for key, value in collab_item("spawnAgent", [CHILD]).items()
-                if key != "tool"
-            },
-            collab_item("SpawnAgent", [CHILD]),
-            collab_item(["spawnAgent"], [CHILD]),
-        ):
+        for item in ({**collab_item("spawnAgent", [CHILD]), "tool": None},
+                     {key: value for key, value in collab_item("spawnAgent", [CHILD]).items() if key != "tool"},
+                     collab_item("SpawnAgent", [CHILD]), collab_item(["spawnAgent"], [CHILD])):
             session._item("item/completed", item)
         self.assertEqual(events, [])
 
@@ -484,10 +385,7 @@ class TheWorkerBindsAndReleases(TwoChats):
 
     def setUp(self):
         super().setUp()
-        for name, value in (
-            ("running_processes", {}),
-            ("write_task_log", lambda *_args: None),
-        ):
+        for name, value in (("running_processes", {}), ("write_task_log", lambda *_args: None)):
             patcher = patch.object(server, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -498,15 +396,8 @@ class TheWorkerBindsAndReleases(TwoChats):
         proc = type("Process", (), {"stdin": writer, "poll": lambda _: None})()
         server.running_processes[task_id] = proc
         holder = {}
-        session = server.create_approval_session(
-            task_id,
-            proc,
-            "Check the porch light",
-            self.root / "final",
-            None,
-            holder,
-            server.DEFAULT_OPTIONS,
-        )
+        session = server.create_approval_session(task_id, proc, "Check the porch light", self.root / "final",
+                                                 None, holder, server.DEFAULT_OPTIONS)
         session.on_event({"type": "thread.started", "thread_id": thread_id})
         session.thread_id = thread_id
         return session, holder
@@ -536,65 +427,38 @@ class TheWorkerBindsAndReleases(TwoChats):
                 session._item("item/started", collab_item(tool, [OTHER]))
                 session._item("item/completed", collab_item(tool, [OTHER]))
                 # Even an agent.threads event of this chat that names b's thread leaves it with b.
-                session.on_event(
-                    {"type": "agent.threads", "parent": CHAT, "threads": [OTHER]}
-                )
-                self.assertEqual(tool_threads.CHATS.task_for(OTHER), "b")  # R3
-                self.assertIsNone(
-                    self.calls.task_for({"thread_id": OTHER, "arguments": {}})
-                )  # R4
-                self.assertEqual(self.info(OTHER)["backup_folder"], "folder-b")  # R6
+                session.on_event({"type": "agent.threads", "parent": CHAT, "threads": [OTHER]})
+                self.assertEqual(tool_threads.CHATS.task_for(OTHER), "b")                                # R3
+                self.assertIsNone(self.calls.task_for({"thread_id": OTHER, "arguments": {}}))             # R4
+                self.assertEqual(self.info(OTHER)["backup_folder"], "folder-b")                           # R6
                 tool_threads.CHATS.release("a")
-                self.assertEqual(self.info(OTHER)["backup_folder"], "folder-b")  # R5
+                self.assertEqual(self.info(OTHER)["backup_folder"], "folder-b")                           # R5
 
     def test_r7_a_stray_key_field_never_names_a_chat(self):
         with self.assertRaises(ValueError):
-            self.checks.dispatch(
-                {
-                    "operation": "unsupported",
-                    "capability": self.checks.capabilities["a"],
-                }
-            )
-        self.checks.dispatch(
-            {
-                "operation": "unsupported",
-                "thread_id": CHAT,
-                "capability": self.checks.capabilities["b"],
-            }
-        )
+            self.checks.dispatch({"operation": "unsupported", "capability": self.checks.capabilities["a"]})
+        self.checks.dispatch({"operation": "unsupported", "thread_id": CHAT,
+                              "capability": self.checks.capabilities["b"]})
         self.assertFalse(server.tasks["b"].get("verification"))
 
-    def test_r8_a_null_key_beside_a_thread_id_is_refused(self):
-        # A request with a key field is a remote-control request; a null key is no key, and never the chat.
-        self.assertIsNone(
-            self.calls.task_for(
-                {"capability": None, "thread_id": CHAT, "arguments": {}}
-            )
-        )
+    def test_r8_a_key_field_neither_opens_nor_closes_a_chat(self):
+        # D-CX-KEYS: the chat socket reads no key; the thread id alone names the chat.
+        self.assertEqual(self.calls.task_for({"capability": None, "thread_id": CHAT, "arguments": {}}), "a")
+        self.assertIsNone(self.calls.task_for({"capability": None, "thread_id": "unbound", "arguments": {}}))
 
     def test_a_follow_up_binds_its_thread_at_the_start(self):
         follow_up = "cccccccc-dddd-4eee-8fff-000000000000"
-        server.tasks["c"] = {
-            "task_id": "c",
-            "status": "queued",
-            "current_turn_id": "turn-c",
-            "session_id": follow_up,
-        }
+        server.tasks["c"] = {"task_id": "c", "status": "queued", "current_turn_id": "turn-c", "session_id": follow_up}
         seen = []
 
         def stop_here(task_id, _turn_id):
             seen.append(tool_threads.CHATS.task_for(follow_up))
             raise StopRun
 
-        with (
-            patch.object(server, "start_activity", side_effect=stop_here),
-            patch.object(server, "verification", self.checks),
-            patch.object(server, "ha_data", self.data),
-        ):
+        with patch.object(server, "start_activity", side_effect=stop_here), \
+             patch.object(server, "verification", self.checks), patch.object(server, "ha_data", self.data):
             with self.assertRaises(StopRun):
-                server.run_task(
-                    "c", "And the back door?", follow_up, "And the back door?"
-                )
+                server.run_task("c", "And the back door?", follow_up, "And the back door?")
         tool_threads.CHATS.release("c")
         self.assertEqual(seen, ["c"])
 
@@ -604,21 +468,11 @@ class TheWorkerBindsAndReleases(TwoChats):
             tool_threads.CHATS.bind(task_id, CHILD)
 
         tool_threads.CHATS.release("a")
-        quiet = {
-            name: patch.object(server, name, lambda *_args, **_kwargs: None)
-            for name in (
-                "record_diagnostic",
-                "finish_activity",
-                "remove_run_artifacts",
-                "start_next_queued",
-                "cleanup_backups",
-            )
-        }
-        with (
-            patch.object(server, "run_task", side_effect=run),
-            patch.object(server, "verification", self.checks),
-            patch.object(server, "ha_data", self.data),
-        ):
+        quiet = {name: patch.object(server, name, lambda *_args, **_kwargs: None)
+                 for name in ("record_diagnostic", "finish_activity", "remove_run_artifacts", "start_next_queued",
+                              "cleanup_backups")}
+        with patch.object(server, "run_task", side_effect=run), \
+             patch.object(server, "verification", self.checks), patch.object(server, "ha_data", self.data):
             for patcher in quiet.values():
                 patcher.start()
             try:
@@ -642,26 +496,14 @@ class TheEndAndTheLog(TwoChats):
     def test_an_event_while_the_session_closes_leaves_no_thread(self):
         class LateSession:
             def close(self):
-                server.bind_chat_thread(
-                    "a", CHILD
-                )  # one more agent.threads event from the reader
+                server.bind_chat_thread("a", CHILD)  # one more agent.threads event from the reader
 
-        quiet = [
-            patch.object(server, name, lambda *_args, **_kwargs: None)
-            for name in (
-                "record_diagnostic",
-                "finish_activity",
-                "remove_run_artifacts",
-                "start_next_queued",
-                "cleanup_backups",
-            )
-        ]
-        with (
-            patch.object(server, "run_task", lambda *_args: None),
-            patch.dict(server.approval_sessions, {"a": LateSession()}),
-            patch.object(server, "verification", self.checks),
-            patch.object(server, "ha_data", self.data),
-        ):
+        quiet = [patch.object(server, name, lambda *_args, **_kwargs: None)
+                 for name in ("record_diagnostic", "finish_activity", "remove_run_artifacts", "start_next_queued",
+                              "cleanup_backups")]
+        with patch.object(server, "run_task", lambda *_args: None), \
+             patch.dict(server.approval_sessions, {"a": LateSession()}), \
+             patch.object(server, "verification", self.checks), patch.object(server, "ha_data", self.data):
             for patcher in quiet:
                 patcher.start()
             try:

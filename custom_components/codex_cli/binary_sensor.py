@@ -9,10 +9,11 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_BASE_URL, DOMAIN
+from .const import DOMAIN
 from .coordinator import CodexCliCoordinator
 
 PARALLEL_UPDATES = 0
@@ -39,7 +40,7 @@ class CodexRunningBinarySensor(
     """Show whether a Codex task is running."""
 
     _attr_has_entity_name = True
-    _attr_device_class = getattr(BinarySensorDeviceClass, "RUNNING", None)
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "task_running"
 
@@ -49,10 +50,10 @@ class CodexRunningBinarySensor(
         self._attr_unique_id = f"{entry.entry_id}_task_running"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
+            "entry_type": DeviceEntryType.SERVICE,
             "name": "Codex",
             "manufacturer": "OpenAI",
             "model": "Codex for Home Assistant",
-            "configuration_url": entry.data.get(CONF_BASE_URL),
         }
 
     @property
@@ -74,7 +75,7 @@ class CodexSignedInBinarySensor(
         """Set the unique ID and attach the sensor to the Codex device of the config entry."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_signed_in"
-        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}}
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}, "entry_type": DeviceEntryType.SERVICE}
 
     @property
     def is_on(self) -> bool:

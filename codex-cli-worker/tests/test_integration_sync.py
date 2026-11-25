@@ -1,4 +1,4 @@
-"""The app installs and updates its bundled Codex integration in /config, and leaves other installs alone."""
+"""The app installs and updates its bundled Codex integration in /homeassistant, and leaves other installs alone."""
 
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ class InstallAndUpdateTests(SyncTestCase):
         self.assertEqual(self.sync().action, "current")
 
     def test_an_image_without_a_bundle_writes_nothing(self):
-        """An image built without the integration reports no_bundle and leaves /config alone."""
+        """An image built without the integration reports no_bundle and leaves /homeassistant alone."""
         (self.bundled / "manifest.json").unlink()
         result = self.sync()
         self.assertEqual(result.action, "no_bundle")
@@ -416,7 +416,7 @@ class MainTests(SyncTestCase):
         self.assertNotIn("/discovery", [path for path, _ in self.posts])
 
     def test_option_off_writes_nothing(self):
-        """With install_integration false, /config is not touched and nothing is posted."""
+        """With install_integration false, /homeassistant is not touched and nothing is posted."""
         self.options.write_text(json.dumps({"install_integration": False}))
         self.assertEqual(integration_sync.main([]), 0)
         self.assertFalse(self.target.exists())

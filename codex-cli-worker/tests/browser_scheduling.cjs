@@ -43,7 +43,11 @@ const assert = require('node:assert/strict');
           {turn_id:'second',message:'Human continuation'},
           {turn_id:'third',message:'Scheduled request',task_source:'schedule'}]}; renderTask(true);
       });
-      assert.deepEqual(await page.locator('.task-source').allTextContents(), ['Started by lead', 'Scheduled run']);
+      // A chat the removed lead channel started shows no lead label; the scheduled run keeps its label.
+      assert.deepEqual(await page.locator('.task-source').allTextContents(), ['Scheduled run']);
+      // The schedule editor names no lead runs, and nothing on the page names the lead agent.
+      assert.doesNotMatch(await page.locator('#schedule-advanced').textContent(), /lead/i);
+      assert.doesNotMatch(await page.locator('body').innerText(), /started by lead|lead agent/i);
       // Schedule in a chat's menu opens the editor on a new schedule that starts from the chat.
       const chatId=await page.locator('.chat-row [data-menu-for]').first().getAttribute('data-menu-for');
       async function openFromMenu() {
@@ -170,6 +174,23 @@ const assert = require('node:assert/strict');
       await editor.getByRole('button',{name:'Cancel',exact:true}).click();
       await page.locator('#schedule-list').getByRole('button',{name:'Pause',exact:true}).click();
       await page.locator('#schedule-list').getByRole('button',{name:'Resume',exact:true}).waitFor();
+      // Each listed schedule names its chat; the name is a link that closes Settings and opens that chat.
+      const chatTitle=await page.evaluate(id=>chatById(id).title,chatId);
+      const chatLink=page.locator('#schedule-list').getByRole('link',{name:chatTitle,exact:true});
+      assert.equal(await chatLink.count(),1);
+      await chatLink.click();
+      await page.waitForFunction(id=>state.id===id&&!document.querySelector('#settings').open,chatId);
+      // A chat outside the loaded list is asked of the worker; a gone chat and a schedule of no chat say so.
+      await page.route('**/tasks/sample-unloaded', route=>route.fulfill({json:{ok:true,task:{task_id:'sample-unloaded',title:'Sample older chat',turns:[]}}}));
+      await page.route('**/tasks/sample-gone', route=>route.fulfill({status:404,json:{ok:false,error:'task not found'}}));
+      const kept=schedules[0];
+      schedules=[{...kept,id:'unloaded',name:'Older',chat_id:'sample-unloaded'},{...kept,id:'gone',name:'Gone',chat_id:'sample-gone'},{...kept,id:'none',name:'None',chat_id:''}];
+      await openSettings();
+      await page.locator('#schedule-list').getByRole('link',{name:'Sample older chat',exact:true}).waitFor();
+      await page.locator('#schedule-list').getByText('Chat: not found; the next run starts a new chat',{exact:true}).waitFor();
+      await page.locator('#schedule-list').getByText('Chat: a new chat for each run',{exact:true}).waitFor();
+      schedules=[kept];
+      await page.evaluate(()=>document.querySelector('#settings').close()); await openSettings();
       // A masked prompt cannot be edited from Settings or from the chat: only read, paused or deleted.
       schedules[0].prompt='Use [redacted]'; schedules[0].prompt_redacted=true; schedules[0].chat_id=chatId;
       await page.evaluate(()=>document.querySelector('#settings').close()); await openSettings();
@@ -197,9 +218,18 @@ const assert = require('node:assert/strict');
       assert.ok((await page.locator('#schedule-runs').textContent()).includes('waiting for approval'));
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       await page.locator('#close-settings').click();
+      // A wakeup Codex set is on without the owner's approval, so its row says who set it.
+      schedules=[{...created,id:'wakeup',name:'Sample wakeup',spec:{kind:'once',at:1803862800},author:'codex',approved:true,enabled:true,revision:'wakeup',next_due:1803862800},
+                 {...created,id:'own',name:'Sample own',author:'owner',approved:true,enabled:true,revision:'own',next_due:1803862800}];
+      await openSettings();
+      await page.locator('#schedule-list').getByText('Sample wakeup',{exact:true}).waitFor();
+      const rows=await page.locator('#schedule-list p').allTextContents();
+      assert.ok(rows.some((text)=>text.startsWith('On · Set by Codex · ')),rows.join(' | '));
+      assert.equal(rows.filter((text)=>text.includes('Set by Codex')).length,1,rows.join(' | '));
+      await page.locator('#close-settings').click();
       assert.deepEqual(errors,[]);
       await page.close();
-      console.log(`PASS ${width}px: schedule editor from a chat's menu (hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, literal rendering and pending status.`);
+      console.log(`PASS ${width}px: schedule editor from a chat's menu (hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, 'Set by Codex' on a wakeup, literal rendering and pending status.`);
     }
   } finally {await browser.close();}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});
