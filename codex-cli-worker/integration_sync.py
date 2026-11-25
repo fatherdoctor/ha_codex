@@ -39,9 +39,8 @@ import shutil
 import sys
 import time
 
-import requests
-
 from app_paths import CONFIG_ROOT
+import requests
 
 BUNDLED_DIR = Path("/usr/share/ha_codex/integration/codex_cli")
 TARGET_DIR = CONFIG_ROOT / "custom_components" / "codex_cli"

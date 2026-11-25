@@ -25,9 +25,9 @@ from __future__ import annotations
 import argparse
 import ast
 import os
+from pathlib import Path
 import re
 import sys
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SIZE_LIMIT = 1000
@@ -50,12 +50,23 @@ SIZE_EXEMPT = {
 
 # (file, function) pairs allowed to read module globals by a computed name, with the reason.
 GLOBALS_EXEMPT = {
-    ("codex-cli-worker/server.py", "_ToolWorker.__getattr__"): "the tool worker's view of server.py; "
+    (
+        "codex-cli-worker/server.py",
+        "_ToolWorker.__getattr__",
+    ): "the tool worker's view of server.py; "
     "the 0.6 refactor replaces it with an explicit object",
 }
 
 NAMESPACE_CALLS = {"globals", "vars", "locals"}
-LOOKUP_METHODS = {"get", "__getitem__", "__setitem__", "__delitem__", "setdefault", "pop", "update"}
+LOOKUP_METHODS = {
+    "get",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
+    "setdefault",
+    "pop",
+    "update",
+}
 SERVER_PATCH = re.compile(
     r"""patch\(\s*["']server\.\w+"""
     r"""|patch\.object\(\s*server\s*,"""
@@ -93,11 +104,15 @@ def check_sizes(root: Path, exempt: dict[str, str] | None = None) -> list[str]:
             continue
         seen.add(relative)
         if relative not in exempt:
-            failures.append(f"size: {relative} has {lines} lines (limit {SIZE_LIMIT}); split it, or list it in "
-                            "SIZE_EXEMPT in scripts/code_checks.py with the reason")
+            failures.append(
+                f"size: {relative} has {lines} lines (limit {SIZE_LIMIT}); split it, or list it in "
+                "SIZE_EXEMPT in scripts/code_checks.py with the reason"
+            )
     for relative in sorted(set(exempt) - seen):
-        failures.append(f"size: {relative} is listed in SIZE_EXEMPT but is not over {SIZE_LIMIT} lines "
-                        "(or is gone); remove it from the list")
+        failures.append(
+            f"size: {relative} is listed in SIZE_EXEMPT but is not over {SIZE_LIMIT} lines "
+            "(or is gone); remove it from the list"
+        )
     return failures
 
 
@@ -106,7 +121,13 @@ def _is_namespace_call(node: ast.AST) -> bool:
     if not isinstance(node, ast.Call) or node.keywords:
         return False
     func = node.func
-    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else None
+    name = (
+        func.id
+        if isinstance(func, ast.Name)
+        else func.attr
+        if isinstance(func, ast.Attribute)
+        else None
+    )
     if name not in NAMESPACE_CALLS:
         return False
     return not node.args
@@ -116,7 +137,11 @@ def _is_module_object(node: ast.AST) -> bool:
     """True for sys.modules[...] and sys.modules.get(...)."""
     if isinstance(node, ast.Subscript):
         node = node.value
-    elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+    elif (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "get"
+    ):
         node = node.func.value
     else:
         return False
@@ -139,7 +164,11 @@ class _GlobalsByName(ast.NodeVisitor):
     def _namespace(self, node: ast.AST) -> bool:
         if _is_namespace_call(node):
             return True
-        if isinstance(node, ast.Attribute) and node.attr == "__dict__" and _is_module_object(node.value):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "__dict__"
+            and _is_module_object(node.value)
+        ):
             return True
         return isinstance(node, ast.Name) and node.id in self.aliases
 
@@ -161,11 +190,20 @@ class _GlobalsByName(ast.NodeVisitor):
 
     def visit_Call(self, node):
         func = node.func
-        if (isinstance(func, ast.Attribute) and func.attr in LOOKUP_METHODS and self._namespace(func.value)
-                and not (node.args and _is_constant_name(node.args[0]))):
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr in LOOKUP_METHODS
+            and self._namespace(func.value)
+            and not (node.args and _is_constant_name(node.args[0]))
+        ):
             self.hits.append((node.lineno, ".".join(self.scope)))
-        elif (isinstance(func, ast.Name) and func.id in {"getattr", "setattr", "delattr"} and len(node.args) >= 2
-              and _is_module_object(node.args[0]) and not _is_constant_name(node.args[1])):
+        elif (
+            isinstance(func, ast.Name)
+            and func.id in {"getattr", "setattr", "delattr"}
+            and len(node.args) >= 2
+            and _is_module_object(node.args[0])
+            and not _is_constant_name(node.args[1])
+        ):
             self.hits.append((node.lineno, ".".join(self.scope)))
         self.generic_visit(node)
 
@@ -174,10 +212,16 @@ def _namespace_aliases(tree: ast.AST) -> set[str]:
     """Names that are ever bound to globals(), vars() or a module's __dict__ anywhere in the file."""
     aliases = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+        if (
+            isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+            and node.value is not None
+        ):
             value = node.value
             is_namespace = _is_namespace_call(value) or (
-                isinstance(value, ast.Attribute) and value.attr == "__dict__" and _is_module_object(value.value))
+                isinstance(value, ast.Attribute)
+                and value.attr == "__dict__"
+                and _is_module_object(value.value)
+            )
             if not is_namespace:
                 continue
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -203,13 +247,17 @@ def check_globals(root: Path, exempt: dict | None = None) -> list[str]:
         try:
             hits = globals_by_name(path.read_text(encoding="utf-8-sig"), relative)
         except (SyntaxError, ValueError, UnicodeDecodeError) as error:
-            failures.append(f"globals: {relative} could not be parsed, so it could not be checked ({error})")
+            failures.append(
+                f"globals: {relative} could not be parsed, so it could not be checked ({error})"
+            )
             continue
         for line, scope in hits:
             if (relative, scope) not in exempt:
                 where = scope or "module level"
-                failures.append(f"globals: {relative}:{line} ({where}) reads a module global by a computed name; "
-                                "name the global, or pass the object it needs")
+                failures.append(
+                    f"globals: {relative}:{line} ({where}) reads a module global by a computed name; "
+                    "name the global, or pass the object it needs"
+                )
     return failures
 
 
@@ -220,7 +268,9 @@ def count_server_patches(root: Path) -> dict[str, int]:
     for relative, path in source_files(root):
         if path.suffix.lower() != ".py" or tests not in path.parents:
             continue
-        found = len(SERVER_PATCH.findall(path.read_text(encoding="utf-8", errors="replace")))
+        found = len(
+            SERVER_PATCH.findall(path.read_text(encoding="utf-8", errors="replace"))
+        )
         if found:
             counts[relative] = found
     return counts
@@ -237,13 +287,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL {line}")
     total = sum(patches.values())
     if total:
-        print(f"warning: tests patch names inside server.py {total} times in {len(patches)} files "
-              "(not a failure; the number should go down as server.py is split)")
+        print(
+            f"warning: tests patch names inside server.py {total} times in {len(patches)} files "
+            "(not a failure; the number should go down as server.py is split)"
+        )
     if failures:
         print(f"code_checks: {len(failures)} failures")
         return 1
-    print(f"code_checks: ok ({len(SIZE_EXEMPT)} files exempt from the size limit, "
-          f"{len(GLOBALS_EXEMPT)} exempt from the globals rule)")
+    print(
+        f"code_checks: ok ({len(SIZE_EXEMPT)} files exempt from the size limit, "
+        f"{len(GLOBALS_EXEMPT)} exempt from the globals rule)"
+    )
     return 0
 
 

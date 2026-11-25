@@ -8,44 +8,60 @@ ask about: Codex's question before a call becomes the same card, and it waits in
 KeptDifferenceTests holds the differences that remain between a scheduled run and a chat on the page. Each one is
 a limit the app makes; removing one changes a test there.
 """
+
 from __future__ import annotations
 
+from pathlib import Path
 import tempfile
 import threading
 import unittest
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from test_server import server  # First: it puts the worker's folder on sys.path.
 
 # isort: split
+from test_approvals import Transport
+from approvals import AppServerSession
+from ha_call import HomeAssistantCall
 import policy
 import scheduling
 import test_ha_call as ha_calls
-import tool_threads
-from approvals import AppServerSession
-from ha_call import HomeAssistantCall
-from test_approvals import Transport
 from test_tool_card import QUESTION, tool_params
+import tool_threads
 
 CALL_PREFIX = "mcp_servers.home_assistant_call."
 THREAD = "33333333-2222-4333-8444-555555555555"
 # What a schedule's mode saves on its run's task (schedule_api.Worker.submit), by the name the page shows.
 SCHEDULE_MODES = {"Default": "default", "Read only": "read-only"}
 # What a chat on the page saves on its task for the same mode.
-PAGE_CHATS = {"Default": {"permission_mode": "default"}, "Read only": {"permission_mode": "read-only"}}
+PAGE_CHATS = {
+    "Default": {"permission_mode": "default"},
+    "Read only": {"permission_mode": "read-only"},
+}
 
 
 def scheduled_task(background_mode="default", **fields):
     """A task as a schedule starts it: its source is the schedule, and its mode is the schedule's."""
-    return {"task_id": "t", "turns": [], "status": "running", "task_source": "schedule",
-            "background_mode": background_mode, "chat_settings": server.DEFAULT_CHAT_SETTINGS, **fields}
+    return {
+        "task_id": "t",
+        "turns": [],
+        "status": "running",
+        "task_source": "schedule",
+        "background_mode": background_mode,
+        "chat_settings": server.DEFAULT_CHAT_SETTINGS,
+        **fields,
+    }
 
 
 def page_task(**fields):
     """A task as the chat page starts it."""
-    return {"task_id": "t", "turns": [], "status": "running", "chat_settings": server.DEFAULT_CHAT_SETTINGS,
-            **fields}
+    return {
+        "task_id": "t",
+        "turns": [],
+        "status": "running",
+        "chat_settings": server.DEFAULT_CHAT_SETTINGS,
+        **fields,
+    }
 
 
 class LaunchParityTests(unittest.TestCase):
@@ -57,10 +73,15 @@ class LaunchParityTests(unittest.TestCase):
         self.assertEqual(self.launch("schedule")["args"], self.launch("page")["args"])
 
     def test_a_scheduled_run_gets_the_call_tool_and_must_ask_before_each_call(self):
-        values = [value for value in ha_calls.configured(self.launch("schedule")["args"])
-                  if value.startswith(CALL_PREFIX)]
+        values = [
+            value
+            for value in ha_calls.configured(self.launch("schedule")["args"])
+            if value.startswith(CALL_PREFIX)
+        ]
         self.assertIn(CALL_PREFIX + 'tools.call.approval_mode="prompt"', values)
-        self.assertFalse([value for value in values if "default_tools_approval_mode" in value])
+        self.assertFalse(
+            [value for value in values if "default_tools_approval_mode" in value]
+        )
 
     def test_a_scheduled_run_is_begun_and_holds_no_key(self):
         started = self.launch("schedule")
@@ -72,7 +93,10 @@ class LaunchParityTests(unittest.TestCase):
         options = {"HA_TOKEN": "invented-token"}
         texts = {}
         for name, task in (("schedule", scheduled_task()), ("page", page_task())):
-            with patch.dict(server.tasks, {"t": task}, clear=True), patch.object(server, "read_options", return_value=options):
+            with (
+                patch.dict(server.tasks, {"t": task}, clear=True),
+                patch.object(server, "read_options", return_value=options),
+            ):
                 texts[name] = server.exchange_info("t", None)["home_assistant_api"]
         self.assertIn("home_assistant_call call tool", texts["schedule"])
         self.assertEqual(texts["schedule"], texts["page"])
@@ -115,25 +139,43 @@ class ModeTestCase(unittest.TestCase):
 
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.full_access = self.enterContext(patch.object(server.full_access, "is_on", return_value=False))
+        self.full_access = self.enterContext(
+            patch.object(server.full_access, "is_on", return_value=False)
+        )
 
     def session_settings(self, task, app_options=None):
         """Return the thread and turn settings create_approval_session passes to Codex for this task."""
         process = type("Process", (), {"stdin": Mock(), "poll": lambda _: None})()
-        with patch.dict(server.tasks, {"t": task}, clear=True), \
-                patch.object(server, "read_options", return_value=app_options or {}), \
-                patch.object(server, "AppServerSession") as session:
-            server.create_approval_session("t", process, "Turn off the kitchen light", self.root / "final", None, {},
-                                           server.task_options("t"))
-        return session.call_args.kwargs["thread_params"], session.call_args.kwargs["turn_params"]
+        with (
+            patch.dict(server.tasks, {"t": task}, clear=True),
+            patch.object(server, "read_options", return_value=app_options or {}),
+            patch.object(server, "AppServerSession") as session,
+        ):
+            server.create_approval_session(
+                "t",
+                process,
+                "Turn off the kitchen light",
+                self.root / "final",
+                None,
+                {},
+                server.task_options("t"),
+            )
+        return session.call_args.kwargs["thread_params"], session.call_args.kwargs[
+            "turn_params"
+        ]
 
     def mode_of(self, task, app_options=None):
         """Return the three settings that make a permission mode (policy.MODES) as Codex receives them."""
         thread, turn = self.session_settings(task, app_options)
-        self.assertEqual((thread["approvalPolicy"], thread["approvalsReviewer"]),
-                         (turn["approvalPolicy"], turn["approvalsReviewer"]))
-        return {"sandbox": thread["sandbox"], "approval_policy": thread["approvalPolicy"],
-                "approvals_reviewer": thread["approvalsReviewer"]}
+        self.assertEqual(
+            (thread["approvalPolicy"], thread["approvalsReviewer"]),
+            (turn["approvalPolicy"], turn["approvalsReviewer"]),
+        )
+        return {
+            "sandbox": thread["sandbox"],
+            "approval_policy": thread["approvalPolicy"],
+            "approvals_reviewer": thread["approvalsReviewer"],
+        }
 
 
 class ModeParityTests(ModeTestCase):
@@ -151,7 +193,10 @@ class ModeParityTests(ModeTestCase):
         for name, background_mode in SCHEDULE_MODES.items():
             with self.subTest(mode=name):
                 settings = self.mode_of(scheduled_task(background_mode))
-                self.assertEqual((settings["approval_policy"], settings["approvals_reviewer"]), ("on-request", "user"))
+                self.assertEqual(
+                    (settings["approval_policy"], settings["approvals_reviewer"]),
+                    ("on-request", "user"),
+                )
 
 
 class CardTests(ModeTestCase):
@@ -163,36 +208,68 @@ class CardTests(ModeTestCase):
         self.writer = Transport()
         self.saved = []
         session = AppServerSession(
-            self.writer, lock=threading.RLock(), thread_params=thread, turn_params=turn,
-            on_event=lambda event: None, on_approvals=self.saved.append, on_final=lambda text: None,
-            is_active=lambda: True, redact=lambda text: text)
+            self.writer,
+            lock=threading.RLock(),
+            thread_params=thread,
+            turn_params=turn,
+            on_event=lambda event: None,
+            on_approvals=self.saved.append,
+            on_final=lambda text: None,
+            is_active=lambda: True,
+            redact=lambda text: text,
+        )
         session.start()
         session.receive({"id": "worker-1", "result": {}})
-        session.receive({"id": "worker-2", "result": {
-            "thread": {"id": "thread"}, "approvalPolicy": thread["approvalPolicy"],
-            "approvalsReviewer": thread["approvalsReviewer"]}})
+        session.receive(
+            {
+                "id": "worker-2",
+                "result": {
+                    "thread": {"id": "thread"},
+                    "approvalPolicy": thread["approvalPolicy"],
+                    "approvalsReviewer": thread["approvalsReviewer"],
+                },
+            }
+        )
         session.receive({"id": "worker-3", "result": {"turn": {"id": "turn"}}})
         self.before = len(self.writer.messages())
-        session.receive({"id": 7, "method": "mcpServer/elicitation/request", "params": {
-            "threadId": "thread", "turnId": "turn", "serverName": "home_assistant_call", "mode": "form",
-            "message": QUESTION, "requestedSchema": {"type": "object", "properties": {}},
-            "_meta": {"codex_approval_kind": "mcp_tool_call", "persist": ["session", "always"],
-                      "tool_params": tool_params()}}})
+        session.receive(
+            {
+                "id": 7,
+                "method": "mcpServer/elicitation/request",
+                "params": {
+                    "threadId": "thread",
+                    "turnId": "turn",
+                    "serverName": "home_assistant_call",
+                    "mode": "form",
+                    "message": QUESTION,
+                    "requestedSchema": {"type": "object", "properties": {}},
+                    "_meta": {
+                        "codex_approval_kind": "mcp_tool_call",
+                        "persist": ["session", "always"],
+                        "tool_params": tool_params(),
+                    },
+                },
+            }
+        )
         return session
 
     def answers(self):
         """What the worker has answered Codex since the question."""
-        return self.writer.messages()[self.before:]
+        return self.writer.messages()[self.before :]
 
     def test_a_call_from_a_scheduled_run_waits_for_a_card(self):
         for name, background_mode in SCHEDULE_MODES.items():
             with self.subTest(mode=name):
                 session = self.ask(scheduled_task(background_mode))
                 card = self.saved[-1][-1]
-                self.assertEqual((card["kind"], card["status"], card["tool"]),
-                                 ("tool", "pending", "home_assistant_call.call"))
+                self.assertEqual(
+                    (card["kind"], card["status"], card["tool"]),
+                    ("tool", "pending", "home_assistant_call.call"),
+                )
                 self.assertTrue(session.waiting_for_user())
-                self.assertEqual(self.answers(), [])  # Codex has no answer, so the call has not run.
+                self.assertEqual(
+                    self.answers(), []
+                )  # Codex has no answer, so the call has not run.
 
     def test_the_card_of_a_scheduled_run_is_the_page_chats_card(self):
         self.ask(scheduled_task())
@@ -200,23 +277,41 @@ class CardTests(ModeTestCase):
         self.ask(page_task())
         page = self.saved[-1][-1]
         identity = {"approval_id", "requested_at"}
-        self.assertEqual({key: value for key, value in scheduled.items() if key not in identity},
-                         {key: value for key, value in page.items() if key not in identity})
+        self.assertEqual(
+            {key: value for key, value in scheduled.items() if key not in identity},
+            {key: value for key, value in page.items() if key not in identity},
+        )
 
     def test_a_persons_answer_decides_the_call(self):
         for decision, action in (("allow", "accept"), ("deny", "decline")):
             with self.subTest(decision=decision):
                 session = self.ask(scheduled_task())
                 session.decide(self.saved[-1][-1]["approval_id"], decision)
-                self.assertEqual(self.answers(), [{"id": 7, "result": {"action": action, "content": None,
-                                                                         "_meta": None}}])
+                self.assertEqual(
+                    self.answers(),
+                    [
+                        {
+                            "id": 7,
+                            "result": {
+                                "action": action,
+                                "content": None,
+                                "_meta": None,
+                            },
+                        }
+                    ],
+                )
 
     def test_the_waiting_run_is_marked_like_any_chat_that_needs_permission(self):
         """The page's yellow warning reads permission_required of every chat, whoever started it."""
         waiting = [{"approval_id": "a", "status": "pending"}]
-        for name, task in (("schedule", scheduled_task(approvals=waiting)), ("page", page_task(approvals=waiting))):
+        for name, task in (
+            ("schedule", scheduled_task(approvals=waiting)),
+            ("page", page_task(approvals=waiting)),
+        ):
             with self.subTest(task=name):
-                self.assertTrue(server.task_payload(task, summary=True)["permission_required"])
+                self.assertTrue(
+                    server.task_payload(task, summary=True)["permission_required"]
+                )
 
 
 class KeptDifferenceTests(ModeTestCase):
@@ -226,9 +321,19 @@ class KeptDifferenceTests(ModeTestCase):
         """A schedule cannot be saved in Auto-review or Full access."""
         spec = {"type": "interval", "minutes": 60}
         for mode in ("auto-review", "full-access"):
-            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, "Mode must be default or read-only"):
-                scheduling.validate({"name": "Evening check", "prompt": "Check the doors.", "mode": mode,
-                                     "spec": spec}, 0)
+            with (
+                self.subTest(mode=mode),
+                self.assertRaisesRegex(ValueError, "Mode must be default or read-only"),
+            ):
+                scheduling.validate(
+                    {
+                        "name": "Evening check",
+                        "prompt": "Check the doors.",
+                        "mode": mode,
+                        "spec": spec,
+                    },
+                    0,
+                )
 
     def test_a_scheduled_run_never_runs_in_full_access_or_auto_review(self):
         """Even with the Full access switch on and the mode saved on the task, the run uses Default.
@@ -239,15 +344,28 @@ class KeptDifferenceTests(ModeTestCase):
         self.full_access.return_value = True
         for mode in ("full-access", "auto-review"):
             with self.subTest(mode=mode):
-                self.assertEqual(self.mode_of(page_task(permission_mode=mode)), policy.MODES[mode])
-                self.assertEqual(self.mode_of(scheduled_task(permission_mode=mode)), policy.MODES["default"])
+                self.assertEqual(
+                    self.mode_of(page_task(permission_mode=mode)), policy.MODES[mode]
+                )
+                self.assertEqual(
+                    self.mode_of(scheduled_task(permission_mode=mode)),
+                    policy.MODES["default"],
+                )
 
     def test_a_scheduled_runs_question_sends_no_notification(self):
         """A permission request of a scheduled run notifies; a question it asks at the end of its turn does not."""
-        for name, task, notified in (("schedule", scheduled_task(), False), ("page", page_task(), True)):
-            with self.subTest(task=name), patch.dict(server.tasks, {"t": task}, clear=True), \
-                    patch.object(server, "notify_question") as notify:
-                server.notify_task_outcome("t", "needs_input", "", question="Which door?")
+        for name, task, notified in (
+            ("schedule", scheduled_task(), False),
+            ("page", page_task(), True),
+        ):
+            with (
+                self.subTest(task=name),
+                patch.dict(server.tasks, {"t": task}, clear=True),
+                patch.object(server, "notify_question") as notify,
+            ):
+                server.notify_task_outcome(
+                    "t", "needs_input", "", question="Which door?"
+                )
                 self.assertEqual(notify.called, notified)
 
 

@@ -4,17 +4,17 @@ import argparse
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager, suppress
 import ctypes
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-import re
 from pathlib import Path
+import re
 import shlex
 import signal
 import subprocess
 import sys
 import tempfile
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -49,14 +49,23 @@ def codex_process(command: list[str], **options) -> Iterator[subprocess.Popen]:
                         os.waitpid(-process.pid, 0)
 
 
-def run_codex(command: list[str], *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run_codex(
+    command: list[str], *, cwd: Path, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
     """Capture exec output without waiting for descendants to close pipes."""
-    with tempfile.TemporaryFile(mode="w+t") as stdout, tempfile.TemporaryFile(mode="w+t") as stderr:
-        with codex_process(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr) as process:
+    with (
+        tempfile.TemporaryFile(mode="w+t") as stdout,
+        tempfile.TemporaryFile(mode="w+t") as stderr,
+    ):
+        with codex_process(
+            command, cwd=cwd, env=env, stdout=stdout, stderr=stderr
+        ) as process:
             process.wait(timeout=30)
         stdout.seek(0)
         stderr.seek(0)
-        return subprocess.CompletedProcess(command, process.returncode, stdout.read(), stderr.read())
+        return subprocess.CompletedProcess(
+            command, process.returncode, stdout.read(), stderr.read()
+        )
 
 
 def assert_restricted_full_access(result):
@@ -68,7 +77,9 @@ def assert_restricted_full_access(result):
     text, and both warnings must identify the image's requirements file.
     """
     requirements = "/etc/codex/requirements.toml"
-    assert requirements in result.stdout + result.stderr, "No managed requirements diagnostic"
+    assert requirements in result.stdout + result.stderr, (
+        "No managed requirements diagnostic"
+    )
     if result.returncode != 0:
         return "refused"
     warnings = []
@@ -80,33 +91,59 @@ def assert_restricted_full_access(result):
         if not isinstance(event, dict):
             continue
         item = event.get("item") or {}
-        if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "error":
+        if (
+            event.get("type") == "item.completed"
+            and isinstance(item, dict)
+            and item.get("type") == "error"
+        ):
             message = item.get("message")
             if isinstance(message, str) and requirements in message:
                 warnings.append(message)
+
     def fallback(field):
         for message in warnings:
-            if f"Configured value for `{field}` is disallowed by requirements;" in message:
-                match = re.search(r"falling back to required value (.+?)\. Details:", message)
+            if (
+                f"Configured value for `{field}` is disallowed by requirements;"
+                in message
+            ):
+                match = re.search(
+                    r"falling back to required value (.+?)\. Details:", message
+                )
                 if match:
                     return match.group(1)
         return ""
-    assert fallback("approval_policy") == "OnRequest", "Missing managed OnRequest fallback warning"
+
+    assert fallback("approval_policy") == "OnRequest", (
+        "Missing managed OnRequest fallback warning"
+    )
     profile = fallback("permission_profile")
-    assert (profile.startswith("Managed {") and "file_system: Restricted" in profile
-            and "network: Restricted" in profile
-            and not re.search(r"unrestricted|full.?access", profile, re.IGNORECASE)), (
-                "Full-access request succeeded without a reported restricted profile")
+    assert (
+        profile.startswith("Managed {")
+        and "file_system: Restricted" in profile
+        and "network: Restricted" in profile
+        and not re.search(r"unrestricted|full.?access", profile, re.IGNORECASE)
+    ), "Full-access request succeeded without a reported restricted profile"
     return "restricted fallback"
 
 
 @contextmanager
-def worker_approval_session(proc, workspace, root, mode, resume_id, approve, finals, events):
+def worker_approval_session(
+    proc, workspace, root, mode, resume_id, approve, finals, events
+):
     """Exercise production session creation, translating only container fixture paths."""
     task_id = "ssh-fixture"
-    task = {"status": "running", "current_turn_id": "ssh-turn", "turns": [{
-        "execution_settings": {"model": "gpt-5.1-codex", "reasoning_effort": "low"},
-    }]}
+    task = {
+        "status": "running",
+        "current_turn_id": "ssh-turn",
+        "turns": [
+            {
+                "execution_settings": {
+                    "model": "gpt-5.1-codex",
+                    "reasoning_effort": "low",
+                },
+            }
+        ],
+    }
 
     def update_task(_task_id, **fields):
         """Persist approvals in the fixture task as the worker's callback expects."""
@@ -119,21 +156,40 @@ def worker_approval_session(proc, workspace, root, mode, resume_id, approve, fin
         patch.object(server, "api_token", return_value="fixture-worker-token"),
         patch.object(server, "update_task", side_effect=update_task),
         patch.object(server, "write_task_log"),
-        patch.object(server, "record_activity_event", side_effect=lambda _task_id, event: events.append(event)),
+        patch.object(
+            server,
+            "record_activity_event",
+            side_effect=lambda _task_id, event: events.append(event),
+        ),
         patch.object(server, "notify_permission_async"),
     ):
         session = server.create_approval_session(
-            task_id, proc, "Exercise SSH sandbox approvals", root / "ssh-final.json",
-            resume_id, {}, {"codex_sandbox": mode},
+            task_id,
+            proc,
+            "Exercise SSH sandbox approvals",
+            root / "ssh-final.json",
+            resume_id,
+            {},
+            {"codex_sandbox": mode},
         )
         # Production owns the security policy, including on resumed threads.
         policy = session.turn_params["sandboxPolicy"]
         assert policy["networkAccess"] is False, policy
-        assert policy["type"] == ("readOnly" if mode == "read-only" else "workspaceWrite"), policy
-        assert session.thread_params["cwd"] == server.codex_workdir(), session.thread_params
+        assert policy["type"] == (
+            "readOnly" if mode == "read-only" else "workspaceWrite"
+        ), policy
+        assert session.thread_params["cwd"] == server.codex_workdir(), (
+            session.thread_params
+        )
         session.thread_params["cwd"] = str(workspace)
         if mode == "workspace-write":
-            assert policy["writableRoots"] == ["/homeassistant", "/share", "/media", "/media/.agents", "/addon_config"], policy
+            assert policy["writableRoots"] == [
+                "/homeassistant",
+                "/share",
+                "/media",
+                "/media/.agents",
+                "/addon_config",
+            ], policy
             policy["writableRoots"] = [str(workspace)]
         save_approvals = session.on_approvals
         save_final = session.on_final
@@ -156,7 +212,11 @@ def worker_approval_session(proc, workspace, root, mode, resume_id, approve, fin
 def main():
     """Prove allow/deny and session resume preserve the next command's sandbox."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ssh", action="store_true", help="Exercise the packaged SSH client against a local fixed-command server")
+    parser.add_argument(
+        "--ssh",
+        action="store_true",
+        help="Exercise the packaged SSH client against a local fixed-command server",
+    )
     args = parser.parse_args()
     binary = os.environ.get("HA_TEST_CODEX", "/usr/local/bin/codex")
     assert "0.166.0" in subprocess.check_output([binary, "--version"], text=True)
@@ -166,7 +226,12 @@ def main():
         raise OSError(error, os.strerror(error))
     cache = Path.home() / ".cache"
     cache.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="ha-approval-smoke-", dir=cache) as temporary, ExitStack() as resources:
+    with (
+        tempfile.TemporaryDirectory(
+            prefix="ha-approval-smoke-", dir=cache
+        ) as temporary,
+        ExitStack() as resources,
+    ):
         root = Path(temporary)
         workspace = root / "workspace"
         workspace.mkdir()
@@ -199,55 +264,132 @@ def main():
             def do_POST(self):
                 """Return a sandboxed command, an escalation, another sandboxed command, then a final answer."""
                 nonlocal stage
-                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                request = json.loads(
+                    self.rfile.read(int(self.headers["Content-Length"]))
+                )
                 requests.append(request)
                 tools = request.get("tools", [])
                 functions = []
                 for tool in tools:
                     if tool.get("type") == "namespace":
-                        functions.extend((tool["name"], child) for child in tool["tools"])
+                        functions.extend(
+                            (tool["name"], child) for child in tool["tools"]
+                        )
                     else:
                         functions.append((None, tool))
                 if file_case and stage < 2:
-                    selected = next(((namespace, tool) for namespace, tool in functions if tool.get("name") == "exec_command"), None)
-                    assert selected, [(namespace, tool.get("name")) for namespace, tool in functions]
+                    selected = next(
+                        (
+                            (namespace, tool)
+                            for namespace, tool in functions
+                            if tool.get("name") == "exec_command"
+                        ),
+                        None,
+                    )
+                    assert selected, [
+                        (namespace, tool.get("name")) for namespace, tool in functions
+                    ]
                     namespace, tool = selected
                     target = outside_file if stage == 0 else moved_file
                     move = f"*** Move to: {moved_file}\n" if stage == 0 else ""
                     patch = f"*** Begin Patch\n*** Update File: {target}\n{move}@@\n-value: {stage}\n+value: {stage + 1}\n*** End Patch"
                     # The pinned CLI recognizes apply_patch inside exec_command
                     # and routes it through its native file-change approval.
-                    item = {"type": "function_call", "call_id": f"file_{stage}", "name": tool["name"],
-                            "arguments": json.dumps({"cmd": "apply_patch <<'PATCH'\n" + patch + "\nPATCH"})}
+                    item = {
+                        "type": "function_call",
+                        "call_id": f"file_{stage}",
+                        "name": tool["name"],
+                        "arguments": json.dumps(
+                            {"cmd": "apply_patch <<'PATCH'\n" + patch + "\nPATCH"}
+                        ),
+                    }
                     if namespace:
                         item["namespace"] = namespace
                 elif stage < 3 and not final_only and not file_case:
-                    selected = next(((namespace, tool) for namespace, tool in functions if tool.get("name") == "exec_command"), None)
-                    assert selected, [(namespace, tool.get("name")) for namespace, tool in functions]
+                    selected = next(
+                        (
+                            (namespace, tool)
+                            for namespace, tool in functions
+                            if tool.get("name") == "exec_command"
+                        ),
+                        None,
+                    )
+                    assert selected, [
+                        (namespace, tool.get("name")) for namespace, tool in functions
+                    ]
                     namespace, tool = selected
-                    command = ssh_command or shlex.quote(sys.executable) + " -c " + shlex.quote(
-                        f"import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:{provider.server_port}/probe', timeout=3).read().decode())")
+                    command = ssh_command or shlex.quote(
+                        sys.executable
+                    ) + " -c " + shlex.quote(
+                        f"import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:{provider.server_port}/probe', timeout=3).read().decode())"
+                    )
                     arguments = {"cmd": command, "max_output_tokens": 1000}
                     if stage == 1:
-                        arguments.update(sandbox_permissions="require_escalated", justification="Run the local test operation once")
-                    item = {"type": "function_call", "call_id": f"call_{stage}", "name": tool["name"], "arguments": json.dumps(arguments)}
+                        arguments.update(
+                            sandbox_permissions="require_escalated",
+                            justification="Run the local test operation once",
+                        )
+                    item = {
+                        "type": "function_call",
+                        "call_id": f"call_{stage}",
+                        "name": tool["name"],
+                        "arguments": json.dumps(arguments),
+                    }
                     if namespace:
                         item["namespace"] = namespace
                 else:
-                    text = json.dumps({"status": "completed", "summary": "Fixture finished", "details": "", "question": "", "choices": []})
-                    item = {"type": "message", "role": "assistant", "status": "completed", "phase": "final_answer",
-                            "content": [{"type": "output_text", "text": text, "annotations": []}]}
+                    text = json.dumps(
+                        {
+                            "status": "completed",
+                            "summary": "Fixture finished",
+                            "details": "",
+                            "question": "",
+                            "choices": [],
+                        }
+                    )
+                    item = {
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
+                        "phase": "final_answer",
+                        "content": [
+                            {"type": "output_text", "text": text, "annotations": []}
+                        ],
+                    }
                 stage += 1
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 for event in (
                     {"type": "response.created", "response": {"id": f"resp_{stage}"}},
-                    {"type": "response.output_item.added", "output_index": 0, "item": item},
-                    {"type": "response.output_item.done", "output_index": 0, "item": item},
-                    {"type": "response.completed", "response": {"id": f"resp_{stage}", "status": "completed", "output": [item]}},
+                    {
+                        "type": "response.output_item.added",
+                        "output_index": 0,
+                        "item": item,
+                    },
+                    {
+                        "type": "response.output_item.done",
+                        "output_index": 0,
+                        "item": item,
+                    },
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": f"resp_{stage}",
+                            "status": "completed",
+                            "output": [item],
+                        },
+                    },
                 ):
-                    self.wfile.write(("event: " + event["type"] + "\ndata: " + json.dumps(event) + "\n\n").encode())
+                    self.wfile.write(
+                        (
+                            "event: "
+                            + event["type"]
+                            + "\ndata: "
+                            + json.dumps(event)
+                            + "\n\n"
+                        ).encode()
+                    )
                 self.wfile.flush()
 
         provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
@@ -255,12 +397,18 @@ def main():
         (root / "codex-home").mkdir()
         environment = {**os.environ, "CODEX_HOME": str(root / "codex-home")}
         settings = {
-            "model_provider": "fixture", "model_providers.fixture.name": "Fixture",
+            "model_provider": "fixture",
+            "model_providers.fixture.name": "Fixture",
             "model_providers.fixture.base_url": f"http://127.0.0.1:{provider.server_port}/v1",
-            "model_providers.fixture.wire_api": "responses", "model_providers.fixture.requires_openai_auth": False,
+            "model_providers.fixture.wire_api": "responses",
+            "model_providers.fixture.requires_openai_auth": False,
             "check_for_update_on_startup": False,
         }
-        config_args = [arg for key, value in settings.items() for arg in ["-c", key + "=" + json.dumps(value)]]
+        config_args = [
+            arg
+            for key, value in settings.items()
+            for arg in ["-c", key + "=" + json.dumps(value)]
+        ]
         try:
             # Start in the old transport to prove existing saved chats can resume.
             final_only = True
@@ -268,21 +416,66 @@ def main():
             # old transport is exercised in workspace-write; a full-access request must either fail
             # or report both requirements warnings and a restricted effective fallback.
             if Path("/etc/codex/requirements.toml").is_file():
-                refused = run_codex([binary, "exec", "--sandbox", "danger-full-access", "--skip-git-repo-check",
-                                     "--json", "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
-                                    cwd=workspace, env=environment)
+                refused = run_codex(
+                    [
+                        binary,
+                        "exec",
+                        "--sandbox",
+                        "danger-full-access",
+                        "--skip-git-repo-check",
+                        "--json",
+                        "--model",
+                        "gpt-5.1-codex",
+                        *config_args,
+                        "Say fixture finished",
+                    ],
+                    cwd=workspace,
+                    env=environment,
+                )
                 outcome = assert_restricted_full_access(refused)
-                print(f"Managed full-access request: {outcome}; source /etc/codex/requirements.toml.")
-            legacy = run_codex([binary, "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "--json",
-                                "--model", "gpt-5.1-codex", *config_args, "Say fixture finished"],
-                               cwd=workspace, env=environment)
+                print(
+                    f"Managed full-access request: {outcome}; source /etc/codex/requirements.toml."
+                )
+            legacy = run_codex(
+                [
+                    binary,
+                    "exec",
+                    "--sandbox",
+                    "workspace-write",
+                    "--skip-git-repo-check",
+                    "--json",
+                    "--model",
+                    "gpt-5.1-codex",
+                    *config_args,
+                    "Say fixture finished",
+                ],
+                cwd=workspace,
+                env=environment,
+            )
             assert legacy.returncode == 0, (legacy.stdout, legacy.stderr)
-            thread_id = next(json.loads(line)["thread_id"] for line in legacy.stdout.splitlines() if json.loads(line).get("type") == "thread.started")
+            thread_id = next(
+                json.loads(line)["thread_id"]
+                for line in legacy.stdout.splitlines()
+                if json.loads(line).get("type") == "thread.started"
+            )
             final_only = False
-            cases = [("workspace-write", "allow", thread_id), ("read-only", "deny", None), ("read-only", "file", None)]
+            cases = [
+                ("workspace-write", "allow", thread_id),
+                ("read-only", "deny", None),
+                ("read-only", "file", None),
+            ]
             if args.ssh:
-                cases = [(mode, decision, thread_id if (mode, decision) == ("workspace-write", "allow") else None)
-                         for mode in ("workspace-write", "read-only") for decision in ("allow", "deny")]
+                cases = [
+                    (
+                        mode,
+                        decision,
+                        thread_id
+                        if (mode, decision) == ("workspace-write", "allow")
+                        else None,
+                    )
+                    for mode in ("workspace-write", "read-only")
+                    for decision in ("allow", "deny")
+                ]
             for mode, decision, resume_id in cases:
                 file_case = decision == "file"
                 outside_file.write_text("value: 0\n")
@@ -296,12 +489,24 @@ def main():
                 with (
                     error_log.open("w") as errors,
                     ExitStack() as session_context,
-                    codex_process([binary, "app-server", *config_args], cwd=workspace, env=environment,
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors,
-                                  text=True, bufsize=1) as proc,
+                    codex_process(
+                        [binary, "app-server", *config_args],
+                        cwd=workspace,
+                        env=environment,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=errors,
+                        text=True,
+                        bufsize=1,
+                    ) as proc,
                 ):
-                    params = {"cwd": str(workspace), "model": "gpt-5.1-codex", "sandbox": mode,
-                              "approvalPolicy": "on-request", "approvalsReviewer": "user"}
+                    params = {
+                        "cwd": str(workspace),
+                        "model": "gpt-5.1-codex",
+                        "sandbox": mode,
+                        "approvalPolicy": "on-request",
+                        "approvalsReviewer": "user",
+                    }
                     if resume_id:
                         params["threadId"] = resume_id
 
@@ -310,50 +515,104 @@ def main():
                         records[:] = published
                         for record in published:
                             if record["status"] == "pending":
-                                answer = ("allow" if len(published) == 1 else "deny") if file_case else decision
+                                answer = (
+                                    ("allow" if len(published) == 1 else "deny")
+                                    if file_case
+                                    else decision
+                                )
                                 session.decide(record["approval_id"], answer)
 
                     if args.ssh:
-                        session = session_context.enter_context(worker_approval_session(
-                            proc, workspace, root, mode, resume_id, approve, finals, events,
-                        ))
+                        session = session_context.enter_context(
+                            worker_approval_session(
+                                proc,
+                                workspace,
+                                root,
+                                mode,
+                                resume_id,
+                                approve,
+                                finals,
+                                events,
+                            )
+                        )
                     else:
-                        session = AppServerSession(proc.stdin, lock=threading.RLock(), thread_params=params,
-                                                   turn_params={"input": [{"type": "text", "text": "Exercise sandbox and approval"}], "outputSchema": FINAL_RESPONSE_SCHEMA},
-                                                   on_event=events.append, on_approvals=approve, on_final=finals.append,
-                                                   is_active=lambda: proc.poll() is None, redact=lambda text: text)
-                    reader = threading.Thread(target=session.read, args=(proc.stdout,), daemon=True)
+                        session = AppServerSession(
+                            proc.stdin,
+                            lock=threading.RLock(),
+                            thread_params=params,
+                            turn_params={
+                                "input": [
+                                    {
+                                        "type": "text",
+                                        "text": "Exercise sandbox and approval",
+                                    }
+                                ],
+                                "outputSchema": FINAL_RESPONSE_SCHEMA,
+                            },
+                            on_event=events.append,
+                            on_approvals=approve,
+                            on_final=finals.append,
+                            is_active=lambda: proc.poll() is None,
+                            redact=lambda text: text,
+                        )
+                    reader = threading.Thread(
+                        target=session.read, args=(proc.stdout,), daemon=True
+                    )
                     reader.start()
                     try:
                         session.start()
-                        assert session.finished.wait(45), "App-server approval timed out"
+                        assert session.finished.wait(45), (
+                            "App-server approval timed out"
+                        )
                     finally:
                         session.close()
                 reader.join(3)
                 diagnostic = (session.error, error_log.read_text()[-6000:], events[-5:])
                 assert session.returncode == 0 and finals, diagnostic
                 if file_case:
-                    assert len(records) == 2 and [record["status"] for record in records] == ["allowed", "denied"], (records, diagnostic)
-                    assert all(record["kind"] == "file_change" and record["changes"] for record in records), records
-                    assert records[0]["changes"][0]["move_path"] == str(moved_file), records
+                    assert len(records) == 2 and [
+                        record["status"] for record in records
+                    ] == ["allowed", "denied"], (records, diagnostic)
+                    assert all(
+                        record["kind"] == "file_change" and record["changes"]
+                        for record in records
+                    ), records
+                    assert records[0]["changes"][0]["move_path"] == str(moved_file), (
+                        records
+                    )
                     assert not outside_file.exists(), records
-                    assert moved_file.read_text() == "value: 1\n", moved_file.read_text()
+                    assert moved_file.read_text() == "value: 1\n", (
+                        moved_file.read_text()
+                    )
                     continue
                 assert len(records) == 1, (records, diagnostic)
-                assert records[0]["status"] == ("allowed" if decision == "allow" else "denied"), records
-                assert len(probes) == (1 if decision == "allow" else 0), (probes, diagnostic)
+                assert records[0]["status"] == (
+                    "allowed" if decision == "allow" else "denied"
+                ), records
+                assert len(probes) == (1 if decision == "allow" else 0), (
+                    probes,
+                    diagnostic,
+                )
                 assert len(requests) == 4, (len(requests), diagnostic)
                 # Rejected commands may never start and therefore need not emit
                 # command activity items. Their tool responses are authoritative.
                 for call_id in ("call_0", "call_2"):
-                    outputs = [item for item in requests[-1]["input"]
-                               if item.get("type") == "function_call_output" and item.get("call_id") == call_id]
+                    outputs = [
+                        item
+                        for item in requests[-1]["input"]
+                        if item.get("type") == "function_call_output"
+                        and item.get("call_id") == call_id
+                    ]
                     assert outputs, (call_id, requests[-1]["input"])
                     assert "network-action-executed" not in json.dumps(outputs), outputs
             if args.ssh:
-                print("Pinned CLI SSH approvals passed: allow executes once, deny prevents execution, and subsequent SSH commands stay sandboxed in both modes.")
+                print(
+                    "Pinned CLI SSH approvals passed: allow executes once, deny prevents execution, and subsequent SSH commands stay sandboxed in both modes."
+                )
             else:
-                print("Pinned CLI approvals passed: legacy sessions resume, command and file allow/deny works, subsequent actions stay sandboxed.")
+                print(
+                    "Pinned CLI approvals passed: legacy sessions resume, command and file allow/deny works, subsequent actions stay sandboxed."
+                )
         finally:
             provider.shutdown()
             provider.server_close()

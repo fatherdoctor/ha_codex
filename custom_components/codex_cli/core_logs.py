@@ -1,14 +1,14 @@
 """Let the paired worker read bounded Core logs, never other apps' logs."""
+
 from __future__ import annotations
 
+from collections.abc import Iterator
 import hmac
 import json
 import os
-from collections.abc import Iterator
 from typing import Any
 
 from aiohttp import web
-
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.config_entries import ConfigEntryState
@@ -44,13 +44,20 @@ class DiagnosticView(HomeAssistantView):
 
         Raises HTTPServiceUnavailable when no Codex entry is loaded, and HTTPForbidden for any other caller.
         """
-        tokens = [getattr(runtime, "worker_token", None) for runtime in loaded_runtime_data(self.hass)]
-        worker_token = next((token for token in tokens if isinstance(token, str) and token), None)
+        tokens = [
+            getattr(runtime, "worker_token", None)
+            for runtime in loaded_runtime_data(self.hass)
+        ]
+        worker_token = next(
+            (token for token in tokens if isinstance(token, str) and token), None
+        )
         if worker_token is None:
             raise web.HTTPServiceUnavailable()
         supplied = data.get("worker_token", "")
-        if not isinstance(supplied, str) or not request[KEY_HASS_USER].is_admin or not hmac.compare_digest(
-            supplied.encode(), worker_token.encode()
+        if (
+            not isinstance(supplied, str)
+            or not request[KEY_HASS_USER].is_admin
+            or not hmac.compare_digest(supplied.encode(), worker_token.encode())
         ):
             raise web.HTTPForbidden()
 
@@ -68,20 +75,30 @@ class DiagnosticView(HomeAssistantView):
         if not token:
             raise web.HTTPServiceUnavailable()
         async with async_get_clientsession(self.hass).get(
-            "http://supervisor/core/logs", params={"lines": 100},
+            "http://supervisor/core/logs",
+            params={"lines": 100},
             headers={"Authorization": f"Bearer {token}"},
-            timeout=15, allow_redirects=False,
+            timeout=15,
+            allow_redirects=False,
         ) as response:
             if response.status != 200:
-                return self.json({"error": f"Log read returned HTTP {response.status}"}, status_code=502)
+                return self.json(
+                    {"error": f"Log read returned HTTP {response.status}"},
+                    status_code=502,
+                )
             content = bytearray()
             async for chunk in response.content.iter_chunked(4096):
                 content.extend(chunk)
                 if len(content) > 32768:
                     break
         # Final redaction is applied by the worker before persistence or model access.
-        return self.json({"text": bytes(content[:32768]).decode("utf-8", "replace"),
-                          "truncated": len(content) > 32768}, headers={"Cache-Control": "no-store"})
+        return self.json(
+            {
+                "text": bytes(content[:32768]).decode("utf-8", "replace"),
+                "truncated": len(content) > 32768,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     async def payload(self, request: web.Request) -> dict[str, Any]:
         """Read the request body as a JSON object, refusing bodies over 4096 bytes or anything that is not an object."""
@@ -101,5 +118,3 @@ class DiagnosticView(HomeAssistantView):
         if not isinstance(data, dict):
             raise web.HTTPBadRequest()
         return data
-
-

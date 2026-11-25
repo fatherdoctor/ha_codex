@@ -7,13 +7,14 @@ that have a runner thread, and it is the one place that writes those files.
 The store takes what it needs from the rest of the worker as arguments: where the files go, what a restart does to a
 saved chat, and what happens when a chat stops waiting on its owner.
 """
+
 from __future__ import annotations
 
 import copy
 import json
+from pathlib import Path
 import re
 import threading
-from pathlib import Path
 from typing import Any, Callable
 
 # A turn's id: 32 lower-case hex digits (uuid4().hex).
@@ -21,9 +22,25 @@ TURN_ID_RE = re.compile(r"[0-9a-f]{32}")
 
 # The result of an exchange. The current turn keeps a copy of these task-level fields.
 TURN_RESULT_FIELDS = (
-    "status", "summary", "details", "question", "choices", "started_at", "completed_at",
-    "returncode", "changes", "validation_errors", "lovelace_results", "error",
-    "attachments", "config_check", "recovery_files", "backups", "verification", "verification_attachments", "approvals",
+    "status",
+    "summary",
+    "details",
+    "question",
+    "choices",
+    "started_at",
+    "completed_at",
+    "returncode",
+    "changes",
+    "validation_errors",
+    "lovelace_results",
+    "error",
+    "attachments",
+    "config_check",
+    "recovery_files",
+    "backups",
+    "verification",
+    "verification_attachments",
+    "approvals",
 )
 
 # Kept in task.json only: the task index leaves them out to stay small.
@@ -41,21 +58,31 @@ def task_turns(task: dict[str, Any]) -> list[dict[str, Any]]:
     """Adapt legacy records without inventing missing intermediate responses."""
     if "turns" in task:
         return copy.deepcopy(task["turns"])
-    turns = [{
-        "turn_id": "legacy", "message": task.get("prompt", ""),
-        "created_at": task.get("created_at", ""), "legacy": True,
-    }]
+    turns = [
+        {
+            "turn_id": "legacy",
+            "message": task.get("prompt", ""),
+            "created_at": task.get("created_at", ""),
+            "legacy": True,
+        }
+    ]
     for index, reply in enumerate(task.get("reply_history") or []):
-        turns.append({
-            "turn_id": f"legacy-{index + 1}", "message": reply.get("reply", ""),
-            "created_at": reply.get("at", ""), "legacy": True,
-        })
+        turns.append(
+            {
+                "turn_id": f"legacy-{index + 1}",
+                "message": reply.get("reply", ""),
+                "created_at": reply.get("at", ""),
+                "legacy": True,
+            }
+        )
     # The task index still knows the latest turn id when task.json was lost; with it, the
     # recovered chat finds that turn's saved activity.
     current_turn = task.get("current_turn_id")
     if isinstance(current_turn, str) and TURN_ID_RE.fullmatch(current_turn):
         turns[-1]["turn_id"] = current_turn
-    turns[-1].update({key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task})
+    turns[-1].update(
+        {key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task}
+    )
     return turns
 
 
@@ -63,7 +90,9 @@ def sync_current_turn(task: dict[str, Any], now: str) -> None:
     """Keep this exchange's outcome alongside the compatible task-level result."""
     turns = task.get("turns") or []
     if turns and turns[-1].get("turn_id") == task.get("current_turn_id"):
-        turns[-1].update({key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task})
+        turns[-1].update(
+            {key: copy.deepcopy(task[key]) for key in TURN_RESULT_FIELDS if key in task}
+        )
         turns[-1]["updated_at"] = task.get("updated_at", now)
 
 
@@ -115,7 +144,11 @@ class TaskStore:
         """Write every task, without its prompt, reply history, and turns, to the task index file while holding the lock."""
         with self.lock:
             slim = {
-                task_id: {key: value for key, value in task.items() if key not in INDEX_EXCLUDED_FIELDS}
+                task_id: {
+                    key: value
+                    for key, value in task.items()
+                    if key not in INDEX_EXCLUDED_FIELDS
+                }
                 for task_id, task in self.tasks.items()
             }
             atomic_json_write(self.index_file(), slim)
@@ -145,7 +178,10 @@ class TaskStore:
                         atomic_json_write(task_file, task)
                     self.tasks[task_id] = task
                 except Exception as exc:
-                    print(f"Could not load task metadata from {task_file}: {exc}", flush=True)
+                    print(
+                        f"Could not load task metadata from {task_file}: {exc}",
+                        flush=True,
+                    )
         index_file = self.index_file()
         if index_file.exists():
             try:
@@ -153,10 +189,16 @@ class TaskStore:
                 if isinstance(loaded, dict):
                     for task_id, task in loaded.items():
                         if task_id not in self.tasks:
-                            secrets_forgotten = restore(task_id, task) or secrets_forgotten
+                            secrets_forgotten = (
+                                restore(task_id, task) or secrets_forgotten
+                            )
                         self.tasks.setdefault(task_id, task)
                     # The index also holds each task's approvals; a diff it saved for a secret file goes too.
-                    if any(holds_secret_diff(task) for task in loaded.values() if isinstance(task, dict)):
+                    if any(
+                        holds_secret_diff(task)
+                        for task in loaded.values()
+                        if isinstance(task, dict)
+                    ):
                         secrets_forgotten = True
             except Exception as exc:
                 print(f"Could not load task index: {exc}", flush=True)
@@ -177,8 +219,11 @@ class TaskStore:
             if not touch and task_id not in self.tasks:
                 return False
             task = self.tasks.setdefault(task_id, {"task_id": task_id})
-            if (task.get("cancellation_requested") and updates.get("status") != "cancelled"
-                    and updates.get("cancellation_requested") is not False):
+            if (
+                task.get("cancellation_requested")
+                and updates.get("status") != "cancelled"
+                and updates.get("cancellation_requested") is not False
+            ):
                 return False
             waited = self.waits_on_owner(task)
             task.update(updates)

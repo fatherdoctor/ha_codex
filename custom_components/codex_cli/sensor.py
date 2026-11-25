@@ -25,7 +25,14 @@ PARALLEL_UPDATES = 0
 PROMPT_KINDS = ("command", "command_input", "file_change", "other")
 # The task states the worker reports (TASK_STATUSES in codex-cli-worker/server.py); the Last task sensor is an
 # enum of these, and its state is unknown (None) while the worker has no task.
-TASK_STATES = ["queued", "running", "waiting_for_input", "completed", "failed", "cancelled"]
+TASK_STATES = [
+    "queued",
+    "running",
+    "waiting_for_input",
+    "completed",
+    "failed",
+    "cancelled",
+]
 AUTH_STATES = ["logged_in", "auth_file_present", "not_logged_in"]
 
 

@@ -1,8 +1,10 @@
 """The chat page's model list comes from Codex (`model/list`), with the built-in list as the fallback."""
+
 from __future__ import annotations
 
 import importlib.util
 import os
+from pathlib import Path
 import stat
 import subprocess
 import sys
@@ -10,13 +12,14 @@ import tempfile
 import textwrap
 import types
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 SERVER_PATH = Path(__file__).resolve().parents[1] / "server.py"
 if importlib.util.find_spec("websocket") is None:
     sys.modules["websocket"] = types.ModuleType("websocket")
-SPEC = importlib.util.spec_from_file_location("codex_worker_server_model_list", SERVER_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "codex_worker_server_model_list", SERVER_PATH
+)
 assert SPEC is not None and SPEC.loader is not None
 server = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(server)
@@ -25,14 +28,30 @@ server.dismiss_wait_notice_async = lambda task_id: None
 LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
 
 
-def entry(model: str, label: str | None = None, levels=LEVELS, hidden=False, default=False,
-          tiers=(), default_tier=None) -> dict:
+def entry(
+    model: str,
+    label: str | None = None,
+    levels=LEVELS,
+    hidden=False,
+    default=False,
+    tiers=(),
+    default_tier=None,
+) -> dict:
     """Return one `model/list` entry in the shape of app-server-protocol rust-v0.166.0 (invented models)."""
     return {
-        "id": model, "model": model, "displayName": label or model.upper(), "description": "",
-        "hidden": hidden, "isDefault": default, "defaultReasoningEffort": "medium",
-        "supportedReasoningEfforts": [{"reasoningEffort": level, "description": ""} for level in levels],
-        "serviceTiers": [{"id": tier, "name": tier.title(), "description": ""} for tier in tiers],
+        "id": model,
+        "model": model,
+        "displayName": label or model.upper(),
+        "description": "",
+        "hidden": hidden,
+        "isDefault": default,
+        "defaultReasoningEffort": "medium",
+        "supportedReasoningEfforts": [
+            {"reasoningEffort": level, "description": ""} for level in levels
+        ],
+        "serviceTiers": [
+            {"id": tier, "name": tier.title(), "description": ""} for tier in tiers
+        ],
         "defaultServiceTier": default_tier,
     }
 
@@ -71,8 +90,15 @@ class ModelListStateMixin:
 
     def setUp(self) -> None:
         saved = dict(server.model_list_state)
-        self.addCleanup(lambda: (server.model_list_state.clear(), server.model_list_state.update(saved)))
-        server.model_list_state.update(models=None, default=None, read_at=None, tried_at=None, reading=False)
+        self.addCleanup(
+            lambda: (
+                server.model_list_state.clear(),
+                server.model_list_state.update(saved),
+            )
+        )
+        server.model_list_state.update(
+            models=None, default=None, read_at=None, tried_at=None, reading=False
+        )
         # No test starts a real Codex: a refresh finds no binary unless a test says otherwise.
         patcher = patch.object(server, "codex_binary_path", return_value=None)
         patcher.start()
@@ -81,66 +107,94 @@ class ModelListStateMixin:
     def use_live(self, models=LIVE, default=None) -> None:
         """Make the worker hold a fresh live list, with the account's default model and level when given."""
         now = server.time.monotonic()
-        server.model_list_state.update(models=models, default=default, read_at=now, tried_at=now, reading=False)
+        server.model_list_state.update(
+            models=models, default=default, read_at=now, tried_at=now, reading=False
+        )
 
 
 class ParseCodexModelsTests(unittest.TestCase):
     def test_keeps_visible_models_with_their_levels_default_first(self):
-        models = server.parse_codex_models([
-            entry("gpt-6-astra", "GPT-6-Astra"),
-            entry(NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "turbo"), default=True),
-            entry("gpt-6-luna", "GPT-6-Luna", LEVELS[:5]),
-        ])
-        self.assertEqual(models, (
-            server.ChatModel(NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "turbo")),
-            server.ChatModel("gpt-6-astra", "GPT-6-Astra", LEVELS),
-            server.ChatModel("gpt-6-luna", "GPT-6-Luna", LEVELS[:5]),
-        ))
+        models = server.parse_codex_models(
+            [
+                entry("gpt-6-astra", "GPT-6-Astra"),
+                entry(
+                    NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "turbo"), default=True
+                ),
+                entry("gpt-6-luna", "GPT-6-Luna", LEVELS[:5]),
+            ]
+        )
+        self.assertEqual(
+            models,
+            (
+                server.ChatModel(NEW_MODEL, "GPT-9.9 Nova", ("low", "medium", "turbo")),
+                server.ChatModel("gpt-6-astra", "GPT-6-Astra", LEVELS),
+                server.ChatModel("gpt-6-luna", "GPT-6-Luna", LEVELS[:5]),
+            ),
+        )
 
     def test_fast_comes_from_the_service_tiers(self):
         odd_tiers = entry("gpt-odd-tiers")
         odd_tiers["serviceTiers"] = "priority"
-        models = server.parse_codex_models([
-            entry("gpt-fast-offered", tiers=("priority",)),
-            entry("gpt-fast-default", tiers=("priority",), default_tier="priority"),
-            entry("gpt-other-tier", tiers=("flex",), default_tier="flex"),
-            entry("gpt-tier-not-listed", default_tier="priority"),
-            odd_tiers,
-        ])
-        self.assertEqual({model.id: model.fast for model in models}, {
-            "gpt-fast-offered": False, "gpt-fast-default": True, "gpt-other-tier": None,
-            "gpt-tier-not-listed": None, "gpt-odd-tiers": None,
-        })
+        models = server.parse_codex_models(
+            [
+                entry("gpt-fast-offered", tiers=("priority",)),
+                entry("gpt-fast-default", tiers=("priority",), default_tier="priority"),
+                entry("gpt-other-tier", tiers=("flex",), default_tier="flex"),
+                entry("gpt-tier-not-listed", default_tier="priority"),
+                odd_tiers,
+            ]
+        )
+        self.assertEqual(
+            {model.id: model.fast for model in models},
+            {
+                "gpt-fast-offered": False,
+                "gpt-fast-default": True,
+                "gpt-other-tier": None,
+                "gpt-tier-not-listed": None,
+                "gpt-odd-tiers": None,
+            },
+        )
 
     def test_leaves_out_hidden_retired_unsafe_and_malformed_entries(self):
         bad_levels = entry("gpt-bad-levels")
         bad_levels["supportedReasoningEfforts"] = "high"
         no_hidden_field = entry("gpt-no-hidden")
         del no_hidden_field["hidden"]
-        models = server.parse_codex_models([
-            entry("gpt-hidden", hidden=True),
-            no_hidden_field,
-            entry("gpt-5.5"),  # retired: runs gpt-5.6-sol, so the picker never offers it
-            entry("--config=x"),
-            entry("../../etc"),
-            entry("gpt with space"),
-            {"id": 7, "hidden": False, "supportedReasoningEfforts": []},
-            entry("gpt-no-levels", levels=()),
-            entry("gpt-odd-levels", levels=("High", "--x", "")),
-            bad_levels,
-            entry("gpt-6-astra"),
-            entry("gpt-6-astra", "Second copy"),
-        ])
+        models = server.parse_codex_models(
+            [
+                entry("gpt-hidden", hidden=True),
+                no_hidden_field,
+                entry(
+                    "gpt-5.5"
+                ),  # retired: runs gpt-5.6-sol, so the picker never offers it
+                entry("--config=x"),
+                entry("../../etc"),
+                entry("gpt with space"),
+                {"id": 7, "hidden": False, "supportedReasoningEfforts": []},
+                entry("gpt-no-levels", levels=()),
+                entry("gpt-odd-levels", levels=("High", "--x", "")),
+                bad_levels,
+                entry("gpt-6-astra"),
+                entry("gpt-6-astra", "Second copy"),
+            ]
+        )
         self.assertEqual([model.id for model in models], ["gpt-6-astra"])
 
     def test_label_falls_back_to_the_id_and_levels_are_not_repeated(self):
         odd = entry("gpt-6-sol", levels=("low", "low", "high"))
         odd["displayName"] = "bad\nlabel"
-        self.assertEqual(server.parse_codex_models([odd]), (server.ChatModel("gpt-6-sol", "gpt-6-sol", ("low", "high")),))
+        self.assertEqual(
+            server.parse_codex_models([odd]),
+            (server.ChatModel("gpt-6-sol", "gpt-6-sol", ("low", "high")),),
+        )
 
     def test_the_list_is_bounded(self):
-        many = [entry(f"gpt-{index}") for index in range(server.MODEL_LIST_MAX_MODELS + 20)]
-        self.assertEqual(len(server.parse_codex_models(many)), server.MODEL_LIST_MAX_MODELS)
+        many = [
+            entry(f"gpt-{index}") for index in range(server.MODEL_LIST_MAX_MODELS + 20)
+        ]
+        self.assertEqual(
+            len(server.parse_codex_models(many)), server.MODEL_LIST_MAX_MODELS
+        )
 
 
 @unittest.skipIf(os.name == "nt", "the stand-in is a script with a shebang line")
@@ -148,15 +202,25 @@ class ReadCodexModelsTests(unittest.TestCase):
     def test_reads_every_page_from_app_server(self):
         with tempfile.TemporaryDirectory() as folder:
             script = Path(folder) / "codex"
-            script.write_text(FAKE_APP_SERVER.format(
-                python=sys.executable, first=repr(entry("gpt-6-astra")), second=repr(entry(NEW_MODEL))))
+            script.write_text(
+                FAKE_APP_SERVER.format(
+                    python=sys.executable,
+                    first=repr(entry("gpt-6-astra")),
+                    second=repr(entry(NEW_MODEL)),
+                )
+            )
             script.chmod(script.stat().st_mode | stat.S_IXUSR)
             real_popen = subprocess.Popen
 
             def popen(command, **kwargs):
                 # The worker runs Codex in /homeassistant; the stand-in runs in the temporary folder.
-                self.assertEqual(command[1:], ["app-server", "--config", "check_for_update_on_startup=false"])
-                return real_popen(command, **{**kwargs, "cwd": folder, "env": dict(os.environ)})
+                self.assertEqual(
+                    command[1:],
+                    ["app-server", "--config", "check_for_update_on_startup=false"],
+                )
+                return real_popen(
+                    command, **{**kwargs, "cwd": folder, "env": dict(os.environ)}
+                )
 
             with patch.object(server.subprocess, "Popen", side_effect=popen):
                 entries = server.read_codex_models(str(script))
@@ -171,17 +235,25 @@ class LiveListTests(ModelListStateMixin, unittest.TestCase):
     def test_live_list_replaces_the_built_in_one(self):
         self.use_live()
         self.assertEqual(server.chat_models(), LIVE)
-        self.assertEqual(server.model_efforts(NEW_MODEL), ("low", "medium", "high", "turbo"))
+        self.assertEqual(
+            server.model_efforts(NEW_MODEL), ("low", "medium", "high", "turbo")
+        )
         # A model only the built-in list has keeps its levels, so a saved chat on it still runs.
-        self.assertEqual(server.model_efforts("gpt-6-luna"), server.CHAT_MODEL_EFFORTS["gpt-6-luna"])
+        self.assertEqual(
+            server.model_efforts("gpt-6-luna"), server.CHAT_MODEL_EFFORTS["gpt-6-luna"]
+        )
         self.assertIn("turbo", server.known_efforts())
 
     def test_refresh_keeps_the_last_good_list_after_a_failure(self):
         self.use_live()
         server.model_list_state["read_at"] = None
         with (
-            patch.object(server, "codex_binary_path", return_value="/usr/local/bin/codex"),
-            patch.object(server, "read_codex_models", side_effect=TimeoutError("no answer")),
+            patch.object(
+                server, "codex_binary_path", return_value="/usr/local/bin/codex"
+            ),
+            patch.object(
+                server, "read_codex_models", side_effect=TimeoutError("no answer")
+            ),
         ):
             server.refresh_models()
         self.assertEqual(server.model_list_state["models"], LIVE)
@@ -189,16 +261,30 @@ class LiveListTests(ModelListStateMixin, unittest.TestCase):
 
     def test_refresh_stores_a_good_answer(self):
         with (
-            patch.object(server, "codex_binary_path", return_value="/usr/local/bin/codex"),
-            patch.object(server, "read_codex_models", return_value=[entry(NEW_MODEL, "GPT-9.9 Nova")]),
+            patch.object(
+                server, "codex_binary_path", return_value="/usr/local/bin/codex"
+            ),
+            patch.object(
+                server,
+                "read_codex_models",
+                return_value=[entry(NEW_MODEL, "GPT-9.9 Nova")],
+            ),
         ):
             server.refresh_models()
-        self.assertEqual(server.chat_models(), (server.ChatModel(NEW_MODEL, "GPT-9.9 Nova", LEVELS),))
+        self.assertEqual(
+            server.chat_models(), (server.ChatModel(NEW_MODEL, "GPT-9.9 Nova", LEVELS),)
+        )
 
     def test_an_empty_answer_keeps_the_built_in_list(self):
         with (
-            patch.object(server, "codex_binary_path", return_value="/usr/local/bin/codex"),
-            patch.object(server, "read_codex_models", return_value=[entry("gpt-hidden", hidden=True)]),
+            patch.object(
+                server, "codex_binary_path", return_value="/usr/local/bin/codex"
+            ),
+            patch.object(
+                server,
+                "read_codex_models",
+                return_value=[entry("gpt-hidden", hidden=True)],
+            ),
         ):
             server.refresh_models()
         self.assertIs(server.chat_models(), server.CHAT_MODELS)
@@ -225,60 +311,102 @@ class ChatSettingsTests(ModelListStateMixin, unittest.TestCase):
     def test_a_live_model_and_its_own_level_are_accepted(self):
         self.use_live()
         with patch.object(server, "read_options", return_value={}):
-            settings = server.parse_chat_settings({"chat_settings": {"model": NEW_MODEL, "reasoning_effort": "turbo"}})
+            settings = server.parse_chat_settings(
+                {"chat_settings": {"model": NEW_MODEL, "reasoning_effort": "turbo"}}
+            )
             self.assertEqual(settings["model"], NEW_MODEL)
             run = server.resolve_chat_settings(settings, {})
-        self.assertEqual(run, {"model": NEW_MODEL, "reasoning_effort": "turbo", "fast": None})
+        self.assertEqual(
+            run, {"model": NEW_MODEL, "reasoning_effort": "turbo", "fast": None}
+        )
 
     def test_fast_follows_the_model_unless_the_chat_chose(self):
-        self.use_live((
-            server.ChatModel("gpt-offers-fast", "Offers Fast", LEVELS, False),
-            server.ChatModel("gpt-fast-default", "Fast Default", LEVELS, True),
-            server.ChatModel("gpt-no-fast", "No Fast", LEVELS),
-        ))
-        cases = (("gpt-offers-fast", None, False), ("gpt-offers-fast", True, True),
-                 ("gpt-fast-default", None, True), ("gpt-fast-default", False, False),
-                 ("gpt-no-fast", True, None), ("gpt-no-fast", None, None))
+        self.use_live(
+            (
+                server.ChatModel("gpt-offers-fast", "Offers Fast", LEVELS, False),
+                server.ChatModel("gpt-fast-default", "Fast Default", LEVELS, True),
+                server.ChatModel("gpt-no-fast", "No Fast", LEVELS),
+            )
+        )
+        cases = (
+            ("gpt-offers-fast", None, False),
+            ("gpt-offers-fast", True, True),
+            ("gpt-fast-default", None, True),
+            ("gpt-fast-default", False, False),
+            ("gpt-no-fast", True, None),
+            ("gpt-no-fast", None, None),
+        )
         with patch.object(server, "read_options", return_value={}):
             for model, choice, runs in cases:
                 with self.subTest(model=model, choice=choice):
-                    settings = server.parse_chat_settings({"chat_settings": {"model": model, "fast": choice}})
+                    settings = server.parse_chat_settings(
+                        {"chat_settings": {"model": model, "fast": choice}}
+                    )
                     self.assertEqual(settings["fast"], choice)
-                    self.assertIs(server.resolve_chat_settings(settings, {})["fast"], runs)
+                    self.assertIs(
+                        server.resolve_chat_settings(settings, {})["fast"], runs
+                    )
 
     def test_fast_must_be_true_false_or_null(self):
         with patch.object(server, "read_options", return_value={}):
             for value in (1, 0, "on", "true", [], {}):
                 with self.subTest(value=value), self.assertRaises(ValueError):
-                    server.parse_chat_settings({"chat_settings": {"model": None, "fast": value}})
+                    server.parse_chat_settings(
+                        {"chat_settings": {"model": None, "fast": value}}
+                    )
 
     def test_settings_saved_before_fast_existed_still_parse(self):
         with patch.object(server, "read_options", return_value={}):
-            settings = server.parse_chat_settings({"chat_settings": {"model": None, "reasoning_effort": None}})
+            settings = server.parse_chat_settings(
+                {"chat_settings": {"model": None, "reasoning_effort": None}}
+            )
         self.assertIsNone(settings["fast"])
 
     def test_a_level_the_live_model_lacks_is_refused(self):
         self.use_live()
-        with patch.object(server, "read_options", return_value={}), self.assertRaises(ValueError):
-            server.parse_chat_settings({"chat_settings": {"model": NEW_MODEL, "reasoning_effort": "ultra"}})
+        with (
+            patch.object(server, "read_options", return_value={}),
+            self.assertRaises(ValueError),
+        ):
+            server.parse_chat_settings(
+                {"chat_settings": {"model": NEW_MODEL, "reasoning_effort": "ultra"}}
+            )
 
     def test_an_unknown_model_asks_codex_once_before_it_is_refused(self):
         with (
             patch.object(server, "read_options", return_value={}),
-            patch.object(server, "codex_binary_path", return_value="/usr/local/bin/codex"),
-            patch.object(server, "read_codex_models", return_value=[entry(NEW_MODEL)]) as read,
+            patch.object(
+                server, "codex_binary_path", return_value="/usr/local/bin/codex"
+            ),
+            patch.object(
+                server, "read_codex_models", return_value=[entry(NEW_MODEL)]
+            ) as read,
         ):
             # A saved chat on a new model, after a worker restart: the check reads the list first.
-            settings = server.parse_chat_settings({"chat_settings": {"model": NEW_MODEL, "reasoning_effort": None}})
+            settings = server.parse_chat_settings(
+                {"chat_settings": {"model": NEW_MODEL, "reasoning_effort": None}}
+            )
             self.assertEqual(settings["model"], NEW_MODEL)
             read.reset_mock()
             with self.assertRaises(ValueError):
-                server.parse_chat_settings({"chat_settings": {"model": "gpt-not-real", "reasoning_effort": None}})
+                server.parse_chat_settings(
+                    {
+                        "chat_settings": {
+                            "model": "gpt-not-real",
+                            "reasoning_effort": None,
+                        }
+                    }
+                )
         read.assert_not_called()
 
     def test_without_codex_an_unknown_model_is_still_refused(self):
-        with patch.object(server, "read_options", return_value={}), self.assertRaises(ValueError):
-            server.parse_chat_settings({"chat_settings": {"model": NEW_MODEL, "reasoning_effort": None}})
+        with (
+            patch.object(server, "read_options", return_value={}),
+            self.assertRaises(ValueError),
+        ):
+            server.parse_chat_settings(
+                {"chat_settings": {"model": NEW_MODEL, "reasoning_effort": None}}
+            )
 
     def test_chat_options_name_the_source_of_the_list(self):
         with (
@@ -292,38 +420,76 @@ class ChatSettingsTests(ModelListStateMixin, unittest.TestCase):
             self.use_live()
             live = client.get("/chat-options", headers=headers).json
         self.assertEqual(built_in["models_source"], "built-in")
-        self.assertEqual([model["id"] for model in built_in["models"]], [model.id for model in server.CHAT_MODELS])
+        self.assertEqual(
+            [model["id"] for model in built_in["models"]],
+            [model.id for model in server.CHAT_MODELS],
+        )
         self.assertEqual(live["models_source"], "codex")
-        self.assertEqual(live["models"][0], {"id": NEW_MODEL, "label": "GPT-9.9 Nova",
-                                             "efforts": ["low", "medium", "high", "turbo"], "fast": None,
-                                             "default_effort": "medium"})
+        self.assertEqual(
+            live["models"][0],
+            {
+                "id": NEW_MODEL,
+                "label": "GPT-9.9 Nova",
+                "efforts": ["low", "medium", "high", "turbo"],
+                "fast": None,
+                "default_effort": "medium",
+            },
+        )
         # The built-in list follows the pinned CLI's catalog: every model offers Fast, two run on it by default.
         # GPT-6.2 Sol's value is taken from GPT-6.1 Sol until the account's live list answers.
-        self.assertEqual({model["id"]: model["fast"] for model in built_in["models"]}["gpt-6-sol"], True)
+        self.assertEqual(
+            {model["id"]: model["fast"] for model in built_in["models"]}["gpt-6-sol"],
+            True,
+        )
         self.assertIs(built_in["default_fast"], False)
 
 
 class ReasoningEffortOptionTests(ModelListStateMixin, unittest.TestCase):
     def test_the_option_takes_any_plain_level(self):
-        for value, expected in (("max", "max"), ("ultra", "ultra"), (" Turbo ", "turbo"), ("minimal", "minimal"),
-                                ("", "medium"), (None, "medium"), ("--model=x", "medium"), ("a b", "medium"),
-                                ("x" * 30, "medium")):
+        for value, expected in (
+            ("max", "max"),
+            ("ultra", "ultra"),
+            (" Turbo ", "turbo"),
+            ("minimal", "minimal"),
+            ("", "medium"),
+            (None, "medium"),
+            ("--model=x", "medium"),
+            ("a b", "medium"),
+            ("x" * 30, "medium"),
+        ):
             with self.subTest(value=value):
-                self.assertEqual(server.model_reasoning_effort({"model_reasoning_effort": value}), expected)
+                self.assertEqual(
+                    server.model_reasoning_effort({"model_reasoning_effort": value}),
+                    expected,
+                )
 
     def test_every_value_the_old_list_had_still_works(self):
         for value in ("minimal", "low", "medium", "high", "xhigh"):
             with self.subTest(value=value):
-                run = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS,
-                                                   {"codex_model": "gpt-6-astra", "model_reasoning_effort": value})
+                run = server.resolve_chat_settings(
+                    server.DEFAULT_CHAT_SETTINGS,
+                    {"codex_model": "gpt-6-astra", "model_reasoning_effort": value},
+                )
                 # No model supports minimal; it runs as medium, as before.
-                self.assertEqual(run["reasoning_effort"], "medium" if value == "minimal" else value)
+                self.assertEqual(
+                    run["reasoning_effort"], "medium" if value == "minimal" else value
+                )
 
     def test_a_level_the_model_lacks_runs_on_medium(self):
         options = {"codex_model": "gpt-6-luna", "model_reasoning_effort": "ultra"}
-        self.assertEqual(server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, options)["reasoning_effort"], "medium")
+        self.assertEqual(
+            server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, options)[
+                "reasoning_effort"
+            ],
+            "medium",
+        )
         options["model_reasoning_effort"] = "max"
-        self.assertEqual(server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, options)["reasoning_effort"], "max")
+        self.assertEqual(
+            server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, options)[
+                "reasoning_effort"
+            ],
+            "max",
+        )
 
 
 # The live list of an account whose default is a Sol newer than the built-in list knows (invented ids).
@@ -347,26 +513,38 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
     def test_the_entry_marked_default_gives_the_model_and_its_level(self):
         entries = [entry("gpt-6-astra"), entry(NEW_MODEL, default=True)]
         entries[1]["defaultReasoningEffort"] = "low"
-        self.assertEqual(server.parse_codex_default(entries, server.parse_codex_models(entries)),
-                         server.CodexDefault(NEW_MODEL, "low"))
+        self.assertEqual(
+            server.parse_codex_default(entries, server.parse_codex_models(entries)),
+            server.CodexDefault(NEW_MODEL, "low"),
+        )
 
     def test_a_level_the_model_lacks_or_no_marked_model_falls_back(self):
         odd = entry(NEW_MODEL, levels=("low", "high"), default=True)
         odd["defaultReasoningEffort"] = "turbo"
-        self.assertEqual(server.parse_codex_default([odd], server.parse_codex_models([odd])),
-                         server.CodexDefault(NEW_MODEL, "low"))
+        self.assertEqual(
+            server.parse_codex_default([odd], server.parse_codex_models([odd])),
+            server.CodexDefault(NEW_MODEL, "low"),
+        )
         hidden = entry(NEW_MODEL, hidden=True, default=True)
-        self.assertIsNone(server.parse_codex_default([hidden, entry("gpt-6-astra")],
-                                                     server.parse_codex_models([hidden, entry("gpt-6-astra")])))
+        self.assertIsNone(
+            server.parse_codex_default(
+                [hidden, entry("gpt-6-astra")],
+                server.parse_codex_models([hidden, entry("gpt-6-astra")]),
+            )
+        )
 
     def test_refresh_stores_the_default(self):
         entries = [entry("gpt-6-astra"), entry(NEW_MODEL, default=True)]
         with (
-            patch.object(server, "codex_binary_path", return_value="/usr/local/bin/codex"),
+            patch.object(
+                server, "codex_binary_path", return_value="/usr/local/bin/codex"
+            ),
             patch.object(server, "read_codex_models", return_value=entries),
         ):
             server.refresh_models()
-        self.assertEqual(server.live_default(), server.CodexDefault(NEW_MODEL, "medium"))
+        self.assertEqual(
+            server.live_default(), server.CodexDefault(NEW_MODEL, "medium")
+        )
 
     def test_the_live_default_comes_first(self):
         self.seen.return_value = "gpt-6-astra"
@@ -395,7 +573,10 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
     def test_configuration_choices_match_the_built_in_models(self):
         config = server.yaml.safe_load((SERVER_PATH.parent / "config.yaml").read_text())
         models = [model.id for model in server.CHAT_MODELS]
-        self.assertEqual(config["schema"]["model_choice"], "list(" + "|".join(["Account default", *models, "custom"]) + ")")
+        self.assertEqual(
+            config["schema"]["model_choice"],
+            "list(" + "|".join(["Account default", *models, "custom"]) + ")",
+        )
         self.assertEqual(config["options"]["model_choice"], "Account default")
 
     def test_configuration_choice_for_display_and_for_a_turn(self):
@@ -403,14 +584,32 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
         for options, display, execution in (
             ({"model_choice": "Account default"}, "gpt-6.1-sol", "default"),
             ({"model_choice": "custom", "codex_model": ""}, "gpt-6.1-sol", "default"),
-            ({"model_choice": "custom", "codex_model": NEW_MODEL}, NEW_MODEL, NEW_MODEL),
-            ({"model_choice": "gpt-6-sol", "codex_model": NEW_MODEL}, "gpt-6-sol", "gpt-6-sol"),
-            ({"model_choice": "Account default", "codex_model": NEW_MODEL}, NEW_MODEL, NEW_MODEL),
-            ({"model_choice": "gpt-6-sol", "model_pin": NEW_MODEL}, NEW_MODEL, NEW_MODEL),
+            (
+                {"model_choice": "custom", "codex_model": NEW_MODEL},
+                NEW_MODEL,
+                NEW_MODEL,
+            ),
+            (
+                {"model_choice": "gpt-6-sol", "codex_model": NEW_MODEL},
+                "gpt-6-sol",
+                "gpt-6-sol",
+            ),
+            (
+                {"model_choice": "Account default", "codex_model": NEW_MODEL},
+                NEW_MODEL,
+                NEW_MODEL,
+            ),
+            (
+                {"model_choice": "gpt-6-sol", "model_pin": NEW_MODEL},
+                NEW_MODEL,
+                NEW_MODEL,
+            ),
         ):
             with self.subTest(options=options):
                 self.assertEqual(server.default_model(options), display)
-                self.assertEqual(server.resolve_chat_settings({}, options)["model"], execution)
+                self.assertEqual(
+                    server.resolve_chat_settings({}, options)["model"], execution
+                )
 
     def test_old_stored_options_load_and_suggest_the_dropdown_at_startup(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -431,22 +630,39 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
 
     def test_the_option_or_the_pin_still_wins(self):
         self.use_live(SOL_LIVE, server.CodexDefault("gpt-6.1-sol", "low"))
-        self.assertEqual(server.default_model({"codex_model": "gpt-6-astra"}), "gpt-6-astra")
-        run = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, {"model_pin": "gpt-6-astra"})
-        self.assertEqual(run, {"model": "gpt-6-astra", "reasoning_effort": "medium", "fast": None})
+        self.assertEqual(
+            server.default_model({"codex_model": "gpt-6-astra"}), "gpt-6-astra"
+        )
+        run = server.resolve_chat_settings(
+            server.DEFAULT_CHAT_SETTINGS, {"model_pin": "gpt-6-astra"}
+        )
+        self.assertEqual(
+            run, {"model": "gpt-6-astra", "reasoning_effort": "medium", "fast": None}
+        )
 
     def test_a_chat_on_default_takes_the_account_level_at_the_shipped_option(self):
         self.use_live(SOL_LIVE, server.CodexDefault("gpt-6.1-sol", "low"))
         run = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, {})
-        self.assertEqual(run, {"model": "default", "reasoning_effort": "low", "fast": None})
+        self.assertEqual(
+            run, {"model": "default", "reasoning_effort": "low", "fast": None}
+        )
         # The owner's own level wins, and a chat that chose a model keeps the option's level.
-        run = server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, {"model_reasoning_effort": "high"})
+        run = server.resolve_chat_settings(
+            server.DEFAULT_CHAT_SETTINGS, {"model_reasoning_effort": "high"}
+        )
         self.assertEqual(run["reasoning_effort"], "high")
-        run = server.resolve_chat_settings({"model": "gpt-6-astra", "reasoning_effort": None}, {})
+        run = server.resolve_chat_settings(
+            {"model": "gpt-6-astra", "reasoning_effort": None}, {}
+        )
         self.assertEqual(run["reasoning_effort"], "medium")
         # Before the list is read, medium as before.
         server.model_list_state["default"] = None
-        self.assertEqual(server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, {})["reasoning_effort"], "medium")
+        self.assertEqual(
+            server.resolve_chat_settings(server.DEFAULT_CHAT_SETTINGS, {})[
+                "reasoning_effort"
+            ],
+            "medium",
+        )
 
     def test_chat_options_give_the_reset_its_target(self):
         self.use_live(SOL_LIVE, server.CodexDefault("gpt-6.1-sol", "low"))
@@ -454,11 +670,19 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
             patch.object(server, "read_options", return_value={}),
             patch.object(server, "api_token", return_value="test-token"),
         ):
-            options = server.app.test_client().get(
-                "/chat-options", headers={"Authorization": "Bearer test-token"}).json
+            options = (
+                server.app.test_client()
+                .get("/chat-options", headers={"Authorization": "Bearer test-token"})
+                .json
+            )
         self.assertEqual(options["default_model"], "gpt-6.1-sol")
-        self.assertEqual(options["defaults"], {"model": "default", "reasoning_effort": "low", "fast": None})
-        self.assertEqual({model["default_effort"] for model in options["models"]}, {"medium"})
+        self.assertEqual(
+            options["defaults"],
+            {"model": "default", "reasoning_effort": "low", "fast": None},
+        )
+        self.assertEqual(
+            {model["default_effort"] for model in options["models"]}, {"medium"}
+        )
 
     def test_a_sign_out_forgets_the_account_default(self):
         self.use_live(SOL_LIVE, server.CodexDefault("gpt-6.1-sol", "low"))

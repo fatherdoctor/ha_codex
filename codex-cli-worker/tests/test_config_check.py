@@ -1,22 +1,22 @@
 """Home Assistant configuration check, pre-change copies, and gated dashboard saves."""
+
 from __future__ import annotations
 
+from contextlib import ExitStack
 import json
+from pathlib import Path
 import tarfile
 import tempfile
 import unittest
-import warnings
-from contextlib import ExitStack
-from pathlib import Path
 from unittest.mock import patch
+import warnings
 
 from test_server import server
 
-
 LWP_COOKIE_JAR = (
-    '#LWP-Cookies-2.0\n'
+    "#LWP-Cookies-2.0\n"
     'Set-Cookie3: session=fake-cookie; path="/"; domain=".icloud.example"; '
-    'path_spec; discard; version=0\n'
+    "path_spec; discard; version=0\n"
 )
 # Home Assistant's iCloud integration keeps its jar under .storage/icloud. Other
 # integrations keep theirs under their own names, as iCloud3 does here.
@@ -36,18 +36,29 @@ class FileSyntaxValidationTests(unittest.TestCase):
 
     def test_valid_cookie_jars_are_read_only(self):
         """Added and refreshed cookie jars, including empty jars, pass without writes wherever they are kept."""
-        for rel in (ICLOUD_COOKIE_JAR, ".storage/icloud/nested/account.COOKIEJAR", OTHER_COOKIE_JAR, ".storage/jar"):
+        for rel in (
+            ICLOUD_COOKIE_JAR,
+            ".storage/icloud/nested/account.COOKIEJAR",
+            OTHER_COOKIE_JAR,
+            ".storage/jar",
+        ):
             path = self.config / rel
             path.parent.mkdir(parents=True, exist_ok=True)
-            expired = LWP_COOKIE_JAR.replace('discard;', 'expires="2000-01-01 00:00:00Z";')
-            commented = LWP_COOKIE_JAR.replace("\n", "\n\n  # Cookie metadata comment\n\n", 1)
+            expired = LWP_COOKIE_JAR.replace(
+                "discard;", 'expires="2000-01-01 00:00:00Z";'
+            )
+            commented = LWP_COOKIE_JAR.replace(
+                "\n", "\n\n  # Cookie metadata comment\n\n", 1
+            )
             for content in ("#LWP-Cookies-2.0\n", LWP_COOKIE_JAR, expired, commented):
                 for change in ("added", "changed"):
                     with self.subTest(rel=rel, content=content, change=change):
                         path.write_text(content, encoding="utf-8")
                         before = path.read_bytes()
                         modified = path.stat().st_mtime_ns
-                        self.assertEqual(server.validate_changed_files({change: [rel]}), [])
+                        self.assertEqual(
+                            server.validate_changed_files({change: [rel]}), []
+                        )
                         self.assertEqual(path.read_bytes(), before)
                         self.assertEqual(path.stat().st_mtime_ns, modified)
 
@@ -62,7 +73,11 @@ class FileSyntaxValidationTests(unittest.TestCase):
             b"#LWP-Cookies-2.0\nunexpected=fake-private-cookie\n",
             b"#LWP-Cookies-fake-private-cookie\n",
         )
-        cases = [(rel, content) for rel in (ICLOUD_COOKIE_JAR, OTHER_COOKIE_JAR) for content in malformed]
+        cases = [
+            (rel, content)
+            for rel in (ICLOUD_COOKIE_JAR, OTHER_COOKIE_JAR)
+            for content in malformed
+        ]
         # The iCloud jar is known by its path, so it is checked as a jar even without its header.
         cases.append((ICLOUD_COOKIE_JAR, b"fake-private-cookie-is-not-an-LWP-header\n"))
         for rel, content in cases:
@@ -84,11 +99,23 @@ class FileSyntaxValidationTests(unittest.TestCase):
         cases = (
             (".storage/core.config_entries", '{"data": {}}', "{broken"),
             (".storage/icloud/account.session", "{}", "{broken"),
-            (".storage/other/account.cookiejar", "{}", "fake-private-cookie-is-not-an-LWP-header\n"),
-            (".storage/other/late_header", '{"note": "#LWP-Cookies-2.0"}', "\n" + LWP_COOKIE_JAR),
+            (
+                ".storage/other/account.cookiejar",
+                "{}",
+                "fake-private-cookie-is-not-an-LWP-header\n",
+            ),
+            (
+                ".storage/other/late_header",
+                '{"note": "#LWP-Cookies-2.0"}',
+                "\n" + LWP_COOKIE_JAR,
+            ),
             ("data.json", '{"valid": true}', "{broken"),
             ("cookies.json", '{"valid": true}', LWP_COOKIE_JAR),
-            ("automations.yaml", "automation: !include automations.yaml\n", "automation: [\n"),
+            (
+                "automations.yaml",
+                "automation: !include automations.yaml\n",
+                "automation: [\n",
+            ),
             ("scripts.yml", "script: []\n", "script: [\n"),
         )
         for rel, valid, malformed in cases:
@@ -105,7 +132,9 @@ class FileSyntaxValidationTests(unittest.TestCase):
 
     def test_unreadable_storage_file_is_not_taken_for_a_cookie_jar(self):
         """A .storage file that cannot be opened is left to the JSON check, which reports it as before."""
-        self.assertFalse(server.is_lwp_cookiejar(".storage/gone", self.config / ".storage" / "gone"))
+        self.assertFalse(
+            server.is_lwp_cookiejar(".storage/gone", self.config / ".storage" / "gone")
+        )
 
 
 class FakeResponse:
@@ -131,22 +160,45 @@ class CheckConfigApiTests(unittest.TestCase):
         """Pretend to run inside the add-on with a Supervisor token."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        self.stack.enter_context(patch.object(server, "ha_token", return_value="supervisor-token"))
-        self.stack.enter_context(patch.object(server, "ha_token_source", return_value="supervisor"))
+        self.stack.enter_context(
+            patch.object(server, "ha_token", return_value="supervisor-token")
+        )
+        self.stack.enter_context(
+            patch.object(server, "ha_token_source", return_value="supervisor")
+        )
 
     def test_valid_invalid_and_unavailable_results(self):
         """Home Assistant's reply becomes valid, invalid, or unavailable, and anything but valid carries errors."""
         cases = [
-            (FakeResponse(200, {"result": "valid", "errors": None, "warnings": None}), ("valid", "", "")),
-            (FakeResponse(200, {"result": "invalid", "errors": "Invalid config for 'automation'", "warnings": "deprecated"}),
-             ("invalid", "Invalid config for 'automation'", "deprecated")),
-            (FakeResponse(200, {"result": "invalid", "errors": None}), ("invalid", "Home Assistant reported an invalid configuration.", "")),
+            (
+                FakeResponse(
+                    200, {"result": "valid", "errors": None, "warnings": None}
+                ),
+                ("valid", "", ""),
+            ),
+            (
+                FakeResponse(
+                    200,
+                    {
+                        "result": "invalid",
+                        "errors": "Invalid config for 'automation'",
+                        "warnings": "deprecated",
+                    },
+                ),
+                ("invalid", "Invalid config for 'automation'", "deprecated"),
+            ),
+            (
+                FakeResponse(200, {"result": "invalid", "errors": None}),
+                ("invalid", "Home Assistant reported an invalid configuration.", ""),
+            ),
             (FakeResponse(500, text="boom"), ("unavailable", None, "")),
             (FakeResponse(200, None), ("unavailable", None, "")),
         ]
         for response, (result, errors, warnings) in cases:
             with self.subTest(result=result, errors=errors):
-                with patch.object(server.requests, "post", return_value=response) as post:
+                with patch.object(
+                    server.requests, "post", return_value=response
+                ) as post:
                     outcome = server.check_home_assistant_config()
                 self.assertEqual(outcome["result"], result)
                 self.assertEqual(outcome["warnings"], warnings)
@@ -154,8 +206,13 @@ class CheckConfigApiTests(unittest.TestCase):
                     self.assertEqual(outcome["errors"], errors)
                 else:
                     self.assertTrue(outcome["errors"])
-                self.assertEqual(post.call_args.args[0], "http://supervisor/core/api/config/core/check_config")
-                self.assertEqual(post.call_args.kwargs["timeout"], server.CONFIG_CHECK_TIMEOUT)
+                self.assertEqual(
+                    post.call_args.args[0],
+                    "http://supervisor/core/api/config/core/check_config",
+                )
+                self.assertEqual(
+                    post.call_args.kwargs["timeout"], server.CONFIG_CHECK_TIMEOUT
+                )
 
     def test_connection_failure_and_missing_token(self):
         """A failed connection or a missing token makes the check unavailable instead of raising."""
@@ -164,7 +221,9 @@ class CheckConfigApiTests(unittest.TestCase):
         self.assertEqual(outcome["result"], "unavailable")
         self.assertIn("unreachable", outcome["errors"])
         with patch.object(server, "ha_token", return_value=""):
-            self.assertEqual(server.check_home_assistant_config()["result"], "unavailable")
+            self.assertEqual(
+                server.check_home_assistant_config()["result"], "unavailable"
+            )
 
 
 class AssessChangesTests(unittest.TestCase):
@@ -181,13 +240,26 @@ class AssessChangesTests(unittest.TestCase):
         self.run_dir.mkdir()
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.config))
         self.stack.enter_context(patch.object(server, "write_task_log"))
-        self.stack.enter_context(patch.object(server, "task_cancellation_requested", return_value=False))
+        self.stack.enter_context(
+            patch.object(server, "task_cancellation_requested", return_value=False)
+        )
         self.options = {"auto_save_lovelace": True, "config_check": True}
-        self.stack.enter_context(patch.object(server, "read_options", side_effect=lambda: dict(self.options)))
-        self.check = self.stack.enter_context(patch.object(
-            server, "check_home_assistant_config", return_value={"result": "valid", "errors": "", "warnings": ""}))
-        self.save = self.stack.enter_context(patch.object(server, "save_lovelace_dashboard", return_value=(True, "ok")))
-        self.stack.enter_context(patch.object(server, "read_lovelace_registry", return_value={}))
+        self.stack.enter_context(
+            patch.object(server, "read_options", side_effect=lambda: dict(self.options))
+        )
+        self.check = self.stack.enter_context(
+            patch.object(
+                server,
+                "check_home_assistant_config",
+                return_value={"result": "valid", "errors": "", "warnings": ""},
+            )
+        )
+        self.save = self.stack.enter_context(
+            patch.object(server, "save_lovelace_dashboard", return_value=(True, "ok"))
+        )
+        self.stack.enter_context(
+            patch.object(server, "read_lovelace_registry", return_value={})
+        )
 
     def snapshot(self, files):
         """Write files into the config tree and record them in the run's full snapshot."""
@@ -208,7 +280,11 @@ class AssessChangesTests(unittest.TestCase):
         """A valid YAML change runs the check and leaves no recovery copies."""
         self.snapshot({"automations.yaml": "- alias: old\n"})
         self.write("automations.yaml", "- alias: new\n")
-        result = server.assess_changes("t", self.run_dir, {"added": [], "changed": ["automations.yaml"], "deleted": []})
+        result = server.assess_changes(
+            "t",
+            self.run_dir,
+            {"added": [], "changed": ["automations.yaml"], "deleted": []},
+        )
         self.assertEqual(result["validation_errors"], [])
         self.assertEqual(result["config_check"]["result"], "valid")
         self.assertEqual(result["recovery_files"], [])
@@ -220,44 +296,114 @@ class AssessChangesTests(unittest.TestCase):
         self.snapshot({"automations.yaml": "- alias: old\n"})
         self.write("automations.yaml", "- alias: new\n")
         self.write("packages/new.yaml", "sensor: []\n")
-        self.check.return_value = {"result": "invalid", "errors": "required key 'trigger' not provided", "warnings": "w"}
-        result = server.assess_changes("t", self.run_dir, {"added": ["packages/new.yaml"], "changed": ["automations.yaml"], "deleted": []})
-        self.assertEqual(result["validation_errors"], ["Home Assistant configuration check failed: required key 'trigger' not provided"])
+        self.check.return_value = {
+            "result": "invalid",
+            "errors": "required key 'trigger' not provided",
+            "warnings": "w",
+        }
+        result = server.assess_changes(
+            "t",
+            self.run_dir,
+            {
+                "added": ["packages/new.yaml"],
+                "changed": ["automations.yaml"],
+                "deleted": [],
+            },
+        )
+        self.assertEqual(
+            result["validation_errors"],
+            [
+                "Home Assistant configuration check failed: required key 'trigger' not provided"
+            ],
+        )
         self.assertEqual(result["config_check"]["result"], "invalid")
         copy_path = self.run_dir / "backups" / "automations.yaml"
-        self.assertEqual(result["recovery_files"], [
-            {"path": "automations.yaml", "copy": str(copy_path.resolve())},
-            {"path": "packages/new.yaml", "copy": ""},
-        ])
+        self.assertEqual(
+            result["recovery_files"],
+            [
+                {"path": "automations.yaml", "copy": str(copy_path.resolve())},
+                {"path": "packages/new.yaml", "copy": ""},
+            ],
+        )
         self.assertEqual(copy_path.read_text(encoding="utf-8"), "- alias: old\n")
-        details = server.validation_details(result["validation_errors"], result["config_check"], result["recovery_files"])
-        self.assertIn(f"Pre-change copies of the affected files are kept for 7 days at: `{copy_path.resolve()}`", details)
-        self.assertIn("New files that did not exist before: `packages/new.yaml`", details)
+        details = server.validation_details(
+            result["validation_errors"],
+            result["config_check"],
+            result["recovery_files"],
+        )
+        self.assertIn(
+            f"Pre-change copies of the affected files are kept for 7 days at: `{copy_path.resolve()}`",
+            details,
+        )
+        self.assertIn(
+            "New files that did not exist before: `packages/new.yaml`", details
+        )
         self.assertIn("Home Assistant warnings: w", details)
 
     def test_syntax_error_skips_the_check_and_dashboard_save(self):
         """A syntax error skips the check and the dashboard save, and still offers copies."""
-        self.snapshot({".storage/lovelace.home": json.dumps({"data": {"config": {"views": []}}}), "scripts.yaml": "a: 1\n"})
+        self.snapshot(
+            {
+                ".storage/lovelace.home": json.dumps(
+                    {"data": {"config": {"views": []}}}
+                ),
+                "scripts.yaml": "a: 1\n",
+            }
+        )
         self.write(".storage/lovelace.home", "{not json")
         self.write("scripts.yaml", "a: [\n")
-        result = server.assess_changes("t", self.run_dir, {"added": [], "changed": [".storage/lovelace.home", "scripts.yaml"], "deleted": []})
+        result = server.assess_changes(
+            "t",
+            self.run_dir,
+            {
+                "added": [],
+                "changed": [".storage/lovelace.home", "scripts.yaml"],
+                "deleted": [],
+            },
+        )
         self.assertEqual(len(result["validation_errors"]), 2)
         self.assertEqual(result["config_check"]["result"], "skipped")
         self.check.assert_not_called()
         self.save.assert_not_called()
-        self.assertEqual(result["lovelace_results"], [{
-            "dashboard_id": "home", "url_path": "", "storage_file": ".storage/lovelace.home",
-            "success": False, "message": "Not saved: the file failed validation.",
-        }])
-        self.assertEqual({entry["path"] for entry in result["recovery_files"]}, {".storage/lovelace.home", "scripts.yaml"})
+        self.assertEqual(
+            result["lovelace_results"],
+            [
+                {
+                    "dashboard_id": "home",
+                    "url_path": "",
+                    "storage_file": ".storage/lovelace.home",
+                    "success": False,
+                    "message": "Not saved: the file failed validation.",
+                }
+            ],
+        )
+        self.assertEqual(
+            {entry["path"] for entry in result["recovery_files"]},
+            {".storage/lovelace.home", "scripts.yaml"},
+        )
         # A dashboard's storage file holds secrets like the rest of .storage, so it gets no readable copy.
-        self.assertFalse((self.run_dir / "backups" / ".storage" / "lovelace.home").exists())
-        self.assertIn({"path": ".storage/lovelace.home", "copy": "", "reason": "excluded_credentials"}, result["recovery_files"])
+        self.assertFalse(
+            (self.run_dir / "backups" / ".storage" / "lovelace.home").exists()
+        )
+        self.assertIn(
+            {
+                "path": ".storage/lovelace.home",
+                "copy": "",
+                "reason": "excluded_credentials",
+            },
+            result["recovery_files"],
+        )
 
     def test_storage_only_changes_skip_the_check_but_save_dashboards(self):
         """A change to dashboard storage alone skips the check and still saves the dashboard."""
-        self.write(".storage/lovelace.home", json.dumps({"data": {"config": {"views": []}}}))
-        result = server.assess_changes("t", self.run_dir, {"added": [], "changed": [".storage/lovelace.home"], "deleted": []})
+        self.write(
+            ".storage/lovelace.home", json.dumps({"data": {"config": {"views": []}}})
+        )
+        result = server.assess_changes(
+            "t",
+            self.run_dir,
+            {"added": [], "changed": [".storage/lovelace.home"], "deleted": []},
+        )
         self.assertEqual(result["config_check"]["result"], "skipped")
         self.check.assert_not_called()
         self.save.assert_called_once()
@@ -267,13 +413,21 @@ class AssessChangesTests(unittest.TestCase):
         """With the config_check option off, a YAML change is reported as disabled and the check never runs."""
         self.options["config_check"] = False
         self.write("automations.yaml", "- alias: new\n")
-        result = server.assess_changes("t", self.run_dir, {"added": [], "changed": ["automations.yaml"], "deleted": []})
+        result = server.assess_changes(
+            "t",
+            self.run_dir,
+            {"added": [], "changed": ["automations.yaml"], "deleted": []},
+        )
         self.assertEqual(result["config_check"]["result"], "disabled")
         self.check.assert_not_called()
 
     def test_deleted_yaml_triggers_the_check(self):
         """Deleting a YAML file is enough to run the check."""
-        result = server.assess_changes("t", self.run_dir, {"added": [], "changed": [], "deleted": ["packages/old.yaml"]})
+        result = server.assess_changes(
+            "t",
+            self.run_dir,
+            {"added": [], "changed": [], "deleted": ["packages/old.yaml"]},
+        )
         self.assertEqual(result["config_check"]["result"], "valid")
         self.check.assert_called_once()
 
@@ -283,9 +437,13 @@ class AssessChangesTests(unittest.TestCase):
             with self.subTest(rel=rel):
                 self.write(rel, LWP_COOKIE_JAR)
                 before = server.build_manifest()
-                self.write(rel, LWP_COOKIE_JAR.replace("fake-cookie", "refreshed-fake-cookie"))
+                self.write(
+                    rel, LWP_COOKIE_JAR.replace("fake-cookie", "refreshed-fake-cookie")
+                )
                 changes = server.diff_manifests(before, server.build_manifest())
-                self.assertEqual(changes, {"added": [], "changed": [rel], "deleted": []})
+                self.assertEqual(
+                    changes, {"added": [], "changed": [rel], "deleted": []}
+                )
 
                 assessment = server.assess_changes("t", self.run_dir, changes, before)
                 self.assertEqual(assessment["validation_errors"], [])
@@ -308,38 +466,67 @@ class RunTaskWiringTests(unittest.TestCase):
     def run_with(self, assessment):
         """Run a resumed task through the test harness with a canned assessment."""
         from test_server import SessionIdParsingTests
+
         harness = SessionIdParsingTests()
         with patch.object(server, "assess_changes", return_value=assessment):
             return harness.run_resumed_task(
-                final_payload={"status": "completed", "summary": "Edited the automation", "question": "", "details": "Notes"},
+                final_payload={
+                    "status": "completed",
+                    "summary": "Edited the automation",
+                    "question": "",
+                    "details": "Notes",
+                },
             )
 
     def test_failed_check_marks_the_task_failed_with_recovery_details(self):
         """The task fails and its details and event carry the recovery copies."""
-        task, events = self.run_with({
-            "validation_errors": ["Home Assistant configuration check failed: bad"],
-            "config_check": {"result": "invalid", "errors": "bad", "warnings": ""},
-            "recovery_files": [{"path": "automations.yaml", "copy": "/tasks/x/backups/automations.yaml"}],
-            "lovelace_results": [],
-        })
+        task, events = self.run_with(
+            {
+                "validation_errors": ["Home Assistant configuration check failed: bad"],
+                "config_check": {"result": "invalid", "errors": "bad", "warnings": ""},
+                "recovery_files": [
+                    {
+                        "path": "automations.yaml",
+                        "copy": "/tasks/x/backups/automations.yaml",
+                    }
+                ],
+                "lovelace_results": [],
+            }
+        )
         self.assertEqual(task["status"], "failed")
-        self.assertIn("Validation errors: Home Assistant configuration check failed: bad", task["details"])
+        self.assertIn(
+            "Validation errors: Home Assistant configuration check failed: bad",
+            task["details"],
+        )
         self.assertIn("/tasks/x/backups/automations.yaml", task["details"])
-        self.assertEqual(task["error"], "Validation errors: Home Assistant configuration check failed: bad")
+        self.assertEqual(
+            task["error"],
+            "Validation errors: Home Assistant configuration check failed: bad",
+        )
         self.assertEqual(task["config_check"]["result"], "invalid")
         self.assertEqual(events[-1]["config_check"]["result"], "invalid")
         self.assertEqual(events[-1]["recovery_files"][0]["path"], "automations.yaml")
 
     def test_unavailable_check_keeps_success_but_notes_it(self):
         """The task stays completed and its details note that the configuration could not be checked."""
-        task, events = self.run_with({
-            "validation_errors": [],
-            "config_check": {"result": "unavailable", "errors": "HTTP 502", "warnings": ""},
-            "recovery_files": [],
-            "lovelace_results": [],
-        })
+        task, events = self.run_with(
+            {
+                "validation_errors": [],
+                "config_check": {
+                    "result": "unavailable",
+                    "errors": "HTTP 502",
+                    "warnings": "",
+                },
+                "recovery_files": [],
+                "lovelace_results": [],
+            }
+        )
         self.assertEqual(task["status"], "completed")
-        self.assertTrue(task["details"].startswith("Notes\n\nHome Assistant could not check the configuration"))
+        self.assertTrue(
+            task["details"].startswith(
+                "Notes\n\nHome Assistant could not check the configuration"
+            )
+        )
         self.assertIn("HTTP 502", task["details"])
         self.assertEqual(events[-1]["config_check"]["result"], "unavailable")
 
@@ -360,27 +547,48 @@ class TerminalOutcomeResetTests(unittest.TestCase):
         self.stack.enter_context(patch.dict(server.tasks, clear=True))
         for name, value in (("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
-        self.stack.enter_context(patch.object(server, "task_root", return_value=root / "tasks"))
-        self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", root / "index.json"))
+        self.stack.enter_context(
+            patch.object(server, "task_root", return_value=root / "tasks")
+        )
+        self.stack.enter_context(
+            patch.object(server, "TASK_STATE_FILE", root / "index.json")
+        )
         self.stack.enter_context(patch.object(server, "CODEX_HOME", root / "codex"))
-        self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
+        self.stack.enter_context(
+            patch.object(server, "api_token", return_value="test-token")
+        )
         self.stack.enter_context(patch.object(server, "write_task_log"))
         self.stack.enter_context(patch.object(server, "notify"))
         self.stack.enter_context(patch.object(server, "refresh_usage_status_async"))
         self.events = []
-        self.stack.enter_context(patch.object(
-            server, "fire_ha_event", side_effect=lambda _event, data: (self.events.append(data) or True, "")))
+        self.stack.enter_context(
+            patch.object(
+                server,
+                "fire_ha_event",
+                side_effect=lambda _event, data: (self.events.append(data) or True, ""),
+            )
+        )
         self.stack.enter_context(patch.object(server, "start_background_task"))
         self.client = server.app.test_client()
         self.headers = {"Authorization": "Bearer test-token"}
         self.session_id = "019fc242-910a-7c92-a17d-54c014e19fc4"
         session_dir = server.CODEX_HOME / "sessions" / "2026" / "09" / "20"
         session_dir.mkdir(parents=True)
-        (session_dir / f"rollout-2026-09-20T01-00-00-{self.session_id}.jsonl").write_text("{}\n")
-        response = self.client.post("/tasks", json={"prompt": "Edit the automation"}, headers=self.headers)
+        (
+            session_dir / f"rollout-2026-09-20T01-00-00-{self.session_id}.jsonl"
+        ).write_text("{}\n")
+        response = self.client.post(
+            "/tasks", json={"prompt": "Edit the automation"}, headers=self.headers
+        )
         self.task_id = response.json["task_id"]
-        server.update_task(self.task_id, status="failed", session_id=self.session_id, summary="Bad edit",
-                           completed_at=server.utc_now(), **self.STALE)
+        server.update_task(
+            self.task_id,
+            status="failed",
+            session_id=self.session_id,
+            summary="Bad edit",
+            completed_at=server.utc_now(),
+            **self.STALE,
+        )
         server.active_task_runners.discard(self.task_id)
 
     def assert_reset(self, record):
@@ -390,7 +598,11 @@ class TerminalOutcomeResetTests(unittest.TestCase):
 
     def test_new_turn_starts_without_the_previous_check(self):
         """A new turn starts with an empty check and no recovery files; the earlier turn keeps its own."""
-        response = self.client.post(f"/tasks/{self.task_id}/continue", json={"message": "Try again"}, headers=self.headers)
+        response = self.client.post(
+            f"/tasks/{self.task_id}/continue",
+            json={"message": "Try again"},
+            headers=self.headers,
+        )
         self.assertEqual(response.status_code, 200)
         task = server.tasks[self.task_id]
         self.assert_reset(task)
@@ -399,7 +611,11 @@ class TerminalOutcomeResetTests(unittest.TestCase):
 
     def test_failed_launch_resets_and_reports_the_fields(self):
         """A failed launch clears the check and recovery files on the task, its turn, and the result event."""
-        self.client.post(f"/tasks/{self.task_id}/continue", json={"message": "Try again"}, headers=self.headers)
+        self.client.post(
+            f"/tasks/{self.task_id}/continue",
+            json={"message": "Try again"},
+            headers=self.headers,
+        )
         server.tasks[self.task_id].update(self.STALE)
         server.fail_task_launch(self.task_id, RuntimeError("no binary"))
         self.assert_reset(server.tasks[self.task_id])
@@ -408,7 +624,11 @@ class TerminalOutcomeResetTests(unittest.TestCase):
 
     def test_cancellation_resets_and_reports_the_fields(self):
         """A cancellation clears the check and recovery files on the task, its turn, and the result event."""
-        self.client.post(f"/tasks/{self.task_id}/continue", json={"message": "Try again"}, headers=self.headers)
+        self.client.post(
+            f"/tasks/{self.task_id}/continue",
+            json={"message": "Try again"},
+            headers=self.headers,
+        )
         server.tasks[self.task_id].update(self.STALE)
         ok, _proc, error = server.request_task_cancellation(self.task_id)
         self.assertTrue(ok, error)

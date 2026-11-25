@@ -1,6 +1,7 @@
 """Shared pytest setup for the worker tests."""
-import sys
+
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -19,5 +20,8 @@ def no_writes_under_the_real_app_folders(request):
     yield
     changed = changes(before, snapshot())
     if changed:
-        pytest.fail(f"{request.node.nodeid} wrote under the real {', '.join(changed)}; "
-                    "use app_folders.isolated_app_folders()", pytrace=False)
+        pytest.fail(
+            f"{request.node.nodeid} wrote under the real {', '.join(changed)}; "
+            "use app_folders.isolated_app_folders()",
+            pytrace=False,
+        )

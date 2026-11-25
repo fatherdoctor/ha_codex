@@ -18,9 +18,9 @@ file is printed), 2 when the script cannot run.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import shutil
 import sys
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "custom_components" / "codex_cli"
@@ -48,7 +48,11 @@ def differences(source: Path, bundle: Path) -> list[str]:
     want, have = files_of(source), files_of(bundle)
     lines = [f"missing: {name}" for name in sorted(want.keys() - have.keys())]
     lines += [f"extra: {name}" for name in sorted(have.keys() - want.keys())]
-    lines += [f"changed: {name}" for name in sorted(want.keys() & have.keys()) if want[name] != have[name]]
+    lines += [
+        f"changed: {name}"
+        for name in sorted(want.keys() & have.keys())
+        if want[name] != have[name]
+    ]
     return lines
 
 
@@ -60,7 +64,11 @@ def copy(source: Path, bundle: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check", action="store_true", help="change nothing; compare the copy with the source")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="change nothing; compare the copy with the source",
+    )
     args = parser.parse_args(argv)
     if not (SOURCE / "manifest.json").is_file():
         print(f"bundle_integration: no integration source at {SOURCE}", file=sys.stderr)
@@ -75,9 +83,13 @@ def main(argv: list[str] | None = None) -> int:
     for line in lines:
         print(line)
     if lines:
-        print("bundle_integration: the bundled integration is not the source; run scripts/bundle_integration.py")
+        print(
+            "bundle_integration: the bundled integration is not the source; run scripts/bundle_integration.py"
+        )
         return 1
-    print(f"bundle_integration: {BUNDLE.relative_to(ROOT)} matches {SOURCE.relative_to(ROOT)}")
+    print(
+        f"bundle_integration: {BUNDLE.relative_to(ROOT)} matches {SOURCE.relative_to(ROOT)}"
+    )
     return 0
 
 

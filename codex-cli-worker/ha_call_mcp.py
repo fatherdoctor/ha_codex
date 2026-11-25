@@ -84,7 +84,9 @@ MAX_REQUEST_BYTES = 65536
 
 def call(arguments, thread_id):
     """Forward the arguments and the call's thread id to the worker once; return its answer."""
-    encoded = json.dumps({"thread_id": thread_id, "arguments": arguments}).encode() + b"\n"
+    encoded = (
+        json.dumps({"thread_id": thread_id, "arguments": arguments}).encode() + b"\n"
+    )
     if len(encoded) > MAX_REQUEST_BYTES:
         raise ValueError("Call request is too large")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:

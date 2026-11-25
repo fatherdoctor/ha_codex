@@ -1,18 +1,18 @@
 """The update banners' facts: a restart to finish an integration update, and an app update (update_status.py)."""
+
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
-import requests
-import websocket
-
 from test_server import server
+import requests
 import update_status
+import websocket
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 
@@ -38,10 +38,20 @@ class FakeSocket:
 
 
 def manifest(version):
-    return {"id": 1, "type": "result", "success": True, "result": {"domain": "codex_cli", "version": version}}
+    return {
+        "id": 1,
+        "type": "result",
+        "success": True,
+        "result": {"domain": "codex_cli", "version": version},
+    }
 
 
-NOT_FOUND = {"id": 1, "type": "result", "success": False, "error": {"code": "not_found", "message": "x"}}
+NOT_FOUND = {
+    "id": 1,
+    "type": "result",
+    "success": False,
+    "error": {"code": "not_found", "message": "x"},
+}
 
 
 class RestartNeeded(unittest.TestCase):
@@ -56,14 +66,22 @@ class RestartNeeded(unittest.TestCase):
 
     def install(self, version):
         self.target.mkdir(exist_ok=True)
-        (self.target / "manifest.json").write_text(json.dumps({"domain": "codex_cli", "version": version}))
+        (self.target / "manifest.json").write_text(
+            json.dumps({"domain": "codex_cli", "version": version})
+        )
 
     def restart(self, reply=None, error=None, auth="auth_ok"):
         socket = FakeSocket(reply, auth)
-        create = patch.object(update_status.websocket, "create_connection",
-                              side_effect=error, return_value=None if error else socket)
+        create = patch.object(
+            update_status.websocket,
+            "create_connection",
+            side_effect=error,
+            return_value=None if error else socket,
+        )
         with create as connect:
-            result = update_status.restart_version("synthetic-supervisor", self.target, self.options)
+            result = update_status.restart_version(
+                "synthetic-supervisor", self.target, self.options
+            )
         return result, socket, connect
 
     def test_core_runs_an_older_version_after_the_app_updated_the_files(self):
@@ -71,8 +89,13 @@ class RestartNeeded(unittest.TestCase):
         result, socket, connect = self.restart(manifest("0.4.2"))
         self.assertEqual(result, "0.5.0")
         self.assertEqual(connect.call_args.args[0], "ws://supervisor/core/websocket")
-        self.assertEqual(socket.sent[0], {"type": "auth", "access_token": "synthetic-supervisor"})
-        self.assertEqual(socket.sent[1], {"id": 1, "type": "manifest/get", "integration": "codex_cli"})
+        self.assertEqual(
+            socket.sent[0], {"type": "auth", "access_token": "synthetic-supervisor"}
+        )
+        self.assertEqual(
+            socket.sent[1],
+            {"id": 1, "type": "manifest/get", "integration": "codex_cli"},
+        )
 
     def test_first_install_before_any_restart(self):
         # Home Assistant did not see the folder at its last start, so it answers not_found.
@@ -105,8 +128,22 @@ class RestartNeeded(unittest.TestCase):
             "unreachable": {"error": OSError("synthetic")},
             "closed": {"error": websocket.WebSocketException("synthetic")},
             "auth refused": {"reply": manifest("0.4.2"), "auth": "auth_invalid"},
-            "other error": {"reply": {"id": 1, "type": "result", "success": False, "error": {"code": "unknown_error"}}},
-            "no version": {"reply": {"id": 1, "type": "result", "success": True, "result": {"domain": "codex_cli"}}},
+            "other error": {
+                "reply": {
+                    "id": 1,
+                    "type": "result",
+                    "success": False,
+                    "error": {"code": "unknown_error"},
+                }
+            },
+            "no version": {
+                "reply": {
+                    "id": 1,
+                    "type": "result",
+                    "success": True,
+                    "result": {"domain": "codex_cli"},
+                }
+            },
             "odd version": {"reply": manifest("<b>1</b>")},
             "wrong id": {"reply": {**manifest("0.4.2"), "id": 2}},
         }
@@ -116,7 +153,11 @@ class RestartNeeded(unittest.TestCase):
 
 
 def self_info(update_available, latest="0.5.1", version="0.5.0"):
-    data = {"version": version, "version_latest": latest, "update_available": update_available}
+    data = {
+        "version": version,
+        "version_latest": latest,
+        "update_available": update_available,
+    }
     return {"result": "ok", "data": data}
 
 
@@ -124,13 +165,18 @@ class UpdateAvailable(unittest.TestCase):
     """The update banner names Supervisor's newer version; the app installs nothing."""
 
     def available(self, reply=None, error=None):
-        with patch.object(update_status, "get_json", side_effect=error, return_value=reply) as get:
+        with patch.object(
+            update_status, "get_json", side_effect=error, return_value=reply
+        ) as get:
             return update_status.available_update("synthetic-supervisor"), get
 
     def test_supervisor_offers_a_newer_version(self):
         result, get = self.available(self_info(True))
         self.assertEqual(result, "0.5.1")
-        self.assertEqual(get.call_args.args[:2], ("http://supervisor/addons/self/info", "synthetic-supervisor"))
+        self.assertEqual(
+            get.call_args.args[:2],
+            ("http://supervisor/addons/self/info", "synthetic-supervisor"),
+        )
 
     def test_no_banner_without_an_update(self):
         self.assertIsNone(self.available(self_info(False))[0])
@@ -138,9 +184,14 @@ class UpdateAvailable(unittest.TestCase):
         self.assertIsNone(self.available(self_info("true"))[0])
 
     def test_no_banner_when_supervisor_cannot_say(self):
-        for case in ({"error": requests.ConnectionError("synthetic")}, {"error": ValueError("403")},
-                     {"reply": {"result": "ok"}}, {"reply": {"data": None}},
-                     {"reply": self_info(True, latest="../x")}, {"reply": self_info(True, latest=None)}):
+        for case in (
+            {"error": requests.ConnectionError("synthetic")},
+            {"error": ValueError("403")},
+            {"reply": {"result": "ok"}},
+            {"reply": {"data": None}},
+            {"reply": self_info(True, latest="../x")},
+            {"reply": self_info(True, latest=None)},
+        ):
             with self.subTest(case=case):
                 self.assertIsNone(self.available(**case)[0])
 
@@ -156,17 +207,28 @@ class Route(unittest.TestCase):
         self.client = server.app.test_client()
 
     def get(self, status, slug="a1b2c3d4_codex_cli_worker"):
-        with patch.object(server.update_status, "read", return_value=status) as read, \
-                patch.object(server, "addon_slug", return_value=slug):
-            response = self.client.get("/update-status", headers={"Authorization": "Bearer tok"})
+        with (
+            patch.object(server.update_status, "read", return_value=status) as read,
+            patch.object(server, "addon_slug", return_value=slug),
+        ):
+            response = self.client.get(
+                "/update-status", headers={"Authorization": "Bearer tok"}
+            )
         read.assert_called_once_with("synthetic-supervisor")
         self.assertEqual(response.status_code, 200)
         return response.get_json()
 
     def test_both_banners_and_the_info_page(self):
         reply = self.get(update_status.UpdateStatus("0.5.0", "0.5.1"))
-        self.assertEqual(reply, {"ok": True, "restart_version": "0.5.0", "update_version": "0.5.1",
-                                 "info_url": "/config/app/a1b2c3d4_codex_cli_worker/info"})
+        self.assertEqual(
+            reply,
+            {
+                "ok": True,
+                "restart_version": "0.5.0",
+                "update_version": "0.5.1",
+                "info_url": "/config/app/a1b2c3d4_codex_cli_worker/info",
+            },
+        )
 
     def test_no_update_means_no_link(self):
         reply = self.get(update_status.UpdateStatus("0.5.0", None))
@@ -174,7 +236,9 @@ class Route(unittest.TestCase):
         self.assertEqual(reply["restart_version"], "0.5.0")
 
     def test_an_update_without_a_slug_has_no_link(self):
-        self.assertIsNone(self.get(update_status.UpdateStatus(None, "0.5.1"), slug=None)["info_url"])
+        self.assertIsNone(
+            self.get(update_status.UpdateStatus(None, "0.5.1"), slug=None)["info_url"]
+        )
 
     def test_the_route_needs_the_worker_token(self):
         self.assertEqual(self.client.get("/update-status").status_code, 401)

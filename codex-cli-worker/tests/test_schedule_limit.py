@@ -75,21 +75,38 @@ class ScheduleLimitTests(unittest.TestCase):
         # A review found the owner's one schedule last behind 140 spent wakeups, and next_offset=140 refused.
         store = self.service.engine().store
         _, thread = self.begin_turn()
-        reminder = store.save(test_scheduling.proposal(name='Owner reminder'), owner=True, now=NOW)
-        waiting = store.save(test_scheduling.proposal(name='Codex hourly'), owner=False, author='codex', now=NOW + 1)
+        reminder = store.save(
+            test_scheduling.proposal(name="Owner reminder"), owner=True, now=NOW
+        )
+        waiting = store.save(
+            test_scheduling.proposal(name="Codex hourly"),
+            owner=False,
+            author="codex",
+            now=NOW + 1,
+        )
         spent = 140
         for index in range(spent):
-            due = NOW + 600 + index * 86400  # one a day: scheduled runs have a daily limit too
-            item = store.save(test_scheduling.proposal(name=f'Wakeup {index}', spec={'kind': 'once', 'at': due}),
-                              owner=False, author='codex', now=NOW + 2 + index)
-            self.assertIsNotNone(store.reserve(due, item['id']))
+            due = (
+                NOW + 600 + index * 86400
+            )  # one a day: scheduled runs have a daily limit too
+            item = store.save(
+                test_scheduling.proposal(
+                    name=f"Wakeup {index}", spec={"kind": "once", "at": due}
+                ),
+                owner=False,
+                author="codex",
+                now=NOW + 2 + index,
+            )
+            self.assertIsNotNone(store.reserve(due, item["id"]))
         seen, offset = [], 0
         while offset is not None:
-            result = self.ask(thread, 'list_schedules', {'offset': offset, 'limit': 20})
-            self.assertTrue(result['ok'], result)
-            seen += [item['id'] for item in result['items']]
-            offset = result['next_offset']
-        self.assertEqual(seen[:2], [waiting['id'], reminder['id']])  # active ones and proposals come first
+            result = self.ask(thread, "list_schedules", {"offset": offset, "limit": 20})
+            self.assertTrue(result["ok"], result)
+            seen += [item["id"] for item in result["items"]]
+            offset = result["next_offset"]
+        self.assertEqual(
+            seen[:2], [waiting["id"], reminder["id"]]
+        )  # active ones and proposals come first
         self.assertEqual(len(seen), scheduling.LISTED)
         self.assertEqual(len(set(seen)), len(seen))
 
@@ -183,9 +200,9 @@ class SchedulingToolTests(unittest.TestCase):
         self.assertIn("1-20", limit["description"])
 
     def test_tool_schema_offers_every_offset_the_service_takes(self):
-        tool = next(t for t in scheduling_mcp.TOOLS if t['name'] == 'list_schedules')
-        offset = tool['inputSchema']['properties']['offset']
-        self.assertEqual((offset['minimum'], offset['maximum']), (0, scheduling.LISTED))
+        tool = next(t for t in scheduling_mcp.TOOLS if t["name"] == "list_schedules")
+        offset = tool["inputSchema"]["properties"]["offset"]
+        self.assertEqual((offset["minimum"], offset["maximum"]), (0, scheduling.LISTED))
 
     def call(self, name, arguments):
         request = {

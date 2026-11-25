@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import importlib.util
+from pathlib import Path
 import sys
 import types
-import unittest
-from datetime import datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-
+import unittest
 
 SENSOR_PATH = (
-    Path(__file__).resolve().parents[2] / "custom_components" / "codex_cli" / "sensor.py"
+    Path(__file__).resolve().parents[2]
+    / "custom_components"
+    / "codex_cli"
+    / "sensor.py"
 )
 
 
@@ -232,9 +234,23 @@ class LastTaskSensorTests(unittest.TestCase):
 
     def test_attributes_come_from_the_latest_task(self) -> None:
         """The sensor shows the latest task's status, and its error is that task's own, not a field of the status."""
-        latest = {"task_id": "chat", "status": "failed", "title": "Review", "summary": "Codex could not start", "error": "boom"}
-        coordinator = SimpleNamespace(data={"latest_task": latest, "active_task_id": None, "error": "not the task's"})
-        entry = SimpleNamespace(entry_id="test-entry", data={"base_url": "http://codex-worker.test"})
+        latest = {
+            "task_id": "chat",
+            "status": "failed",
+            "title": "Review",
+            "summary": "Codex could not start",
+            "error": "boom",
+        }
+        coordinator = SimpleNamespace(
+            data={
+                "latest_task": latest,
+                "active_task_id": None,
+                "error": "not the task's",
+            }
+        )
+        entry = SimpleNamespace(
+            entry_id="test-entry", data={"base_url": "http://codex-worker.test"}
+        )
         last_task = sensor.CodexLastTaskSensor(coordinator, entry)
 
         self.assertEqual(last_task.native_value, "failed")
@@ -249,29 +265,63 @@ class LastTaskSensorTests(unittest.TestCase):
 
     def test_waiting_task_reports_its_question_choices_and_turn(self) -> None:
         """A task that waits for an answer exposes the choices Codex offered and the turn to reply to."""
-        latest = {"task_id": "chat", "status": "waiting_for_input", "question": "Remove the duplicate?",
-                  "choices": ["Go ahead", "Don't change anything"], "current_turn_id": "0123456789abcdef0123456789abcdef"}
-        coordinator = SimpleNamespace(data={"latest_task": latest, "active_task_id": None})
-        entry = SimpleNamespace(entry_id="test-entry", data={"base_url": "http://codex-worker.test"})
-        attributes = sensor.CodexLastTaskSensor(coordinator, entry).extra_state_attributes
+        latest = {
+            "task_id": "chat",
+            "status": "waiting_for_input",
+            "question": "Remove the duplicate?",
+            "choices": ["Go ahead", "Don't change anything"],
+            "current_turn_id": "0123456789abcdef0123456789abcdef",
+        }
+        coordinator = SimpleNamespace(
+            data={"latest_task": latest, "active_task_id": None}
+        )
+        entry = SimpleNamespace(
+            entry_id="test-entry", data={"base_url": "http://codex-worker.test"}
+        )
+        attributes = sensor.CodexLastTaskSensor(
+            coordinator, entry
+        ).extra_state_attributes
 
         self.assertEqual(attributes["question"], "Remove the duplicate?")
         self.assertEqual(attributes["choices"], ["Go ahead", "Don't change anything"])
         self.assertEqual(attributes["turn_id"], "0123456789abcdef0123456789abcdef")
         # A task from a worker without choices reports an empty list, not a missing attribute.
         coordinator.data = {"latest_task": {"task_id": "chat", "status": "completed"}}
-        self.assertEqual(sensor.CodexLastTaskSensor(coordinator, entry).extra_state_attributes["choices"], [])
+        self.assertEqual(
+            sensor.CodexLastTaskSensor(coordinator, entry).extra_state_attributes[
+                "choices"
+            ],
+            [],
+        )
 
     def test_prompt_counts_follow_the_latest_conversation(self) -> None:
         """The permission-prompt sensor shows the latest conversation's total and its counts by kind."""
-        counts = {"command": 2, "command_input": 0, "file_change": 1, "other": 0, "total": 3}
-        coordinator = SimpleNamespace(data={"latest_task": {"task_id": "chat", "approval_counts": counts}})
-        entry = SimpleNamespace(entry_id="test-entry", data={"base_url": "http://codex-worker.test"})
+        counts = {
+            "command": 2,
+            "command_input": 0,
+            "file_change": 1,
+            "other": 0,
+            "total": 3,
+        }
+        coordinator = SimpleNamespace(
+            data={"latest_task": {"task_id": "chat", "approval_counts": counts}}
+        )
+        entry = SimpleNamespace(
+            entry_id="test-entry", data={"base_url": "http://codex-worker.test"}
+        )
         prompts = sensor.CodexPromptCountSensor(coordinator, entry)
 
         self.assertEqual(prompts.native_value, 3)
-        self.assertEqual(prompts.extra_state_attributes,
-                         {"task_id": "chat", "command": 2, "command_input": 0, "file_change": 1, "other": 0})
+        self.assertEqual(
+            prompts.extra_state_attributes,
+            {
+                "task_id": "chat",
+                "command": 2,
+                "command_input": 0,
+                "file_change": 1,
+                "other": 0,
+            },
+        )
         # A conversation that raised none, or a worker too old to count, reads 0.
         coordinator.data = {"latest_task": {"task_id": "older"}}
         self.assertEqual(prompts.native_value, 0)

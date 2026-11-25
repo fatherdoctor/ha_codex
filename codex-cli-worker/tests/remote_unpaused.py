@@ -3,10 +3,11 @@
 Remote Control is paused in this version (remote_control.PAUSED). The tests of its process, pairing and routes
 import both hooks: `from remote_unpaused import setUpModule, tearDownModule`. test_remote_paused.py checks the pause.
 """
+
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

@@ -44,11 +44,26 @@ NEEDS_SUPPORT = "needs_support"
 # "just pass the flags"). The app option codex_sandbox can narrow the sandbox of
 # Default and Auto-review to read-only (mode_settings).
 MODES: dict[str, dict[str, str]] = {
-    "default": {"sandbox": "workspace-write", "approval_policy": "on-request", "approvals_reviewer": "user"},
-    "auto-review": {"sandbox": "workspace-write", "approval_policy": "on-request",
-                    "approvals_reviewer": "auto_review"},
-    "read-only": {"sandbox": "read-only", "approval_policy": "on-request", "approvals_reviewer": "user"},
-    "full-access": {"sandbox": "danger-full-access", "approval_policy": "never", "approvals_reviewer": "user"},
+    "default": {
+        "sandbox": "workspace-write",
+        "approval_policy": "on-request",
+        "approvals_reviewer": "user",
+    },
+    "auto-review": {
+        "sandbox": "workspace-write",
+        "approval_policy": "on-request",
+        "approvals_reviewer": "auto_review",
+    },
+    "read-only": {
+        "sandbox": "read-only",
+        "approval_policy": "on-request",
+        "approvals_reviewer": "user",
+    },
+    "full-access": {
+        "sandbox": "danger-full-access",
+        "approval_policy": "never",
+        "approvals_reviewer": "user",
+    },
 }
 DEFAULT_MODE = "default"
 FULL_ACCESS_MODE = "full-access"
@@ -64,15 +79,25 @@ def load_policy(path: Path | None = None) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise PolicyError(f"The protected policy file {path} is missing from the app image.") from None
+        raise PolicyError(
+            f"The protected policy file {path} is missing from the app image."
+        ) from None
     except (OSError, ValueError) as exc:
-        raise PolicyError(f"The protected policy file {path} could not be read: {exc}") from None
+        raise PolicyError(
+            f"The protected policy file {path} could not be read: {exc}"
+        ) from None
     if not isinstance(data, dict):
         raise PolicyError(f"The protected policy file {path} is not a JSON object.")
     policy = {**STRICT_POLICY, **data}
     modes = policy["allowed_sandbox_modes"]
-    if not isinstance(modes, list) or not modes or not all(isinstance(mode, str) for mode in modes):
-        raise PolicyError("allowed_sandbox_modes must be a non-empty list of sandbox modes.")
+    if (
+        not isinstance(modes, list)
+        or not modes
+        or not all(isinstance(mode, str) for mode in modes)
+    ):
+        raise PolicyError(
+            "allowed_sandbox_modes must be a non-empty list of sandbox modes."
+        )
     return policy
 
 
@@ -100,8 +125,8 @@ def policy_problem(options: dict[str, Any], path: Path | None = None) -> str:
     sandbox = str(options.get("codex_sandbox") or "workspace-write")
     if sandbox not in policy["allowed_sandbox_modes"]:
         allowed = " or ".join(policy["allowed_sandbox_modes"])
-        return (f'The sandbox mode "{sandbox}" is not allowed in this app. '
-                f"Choose {allowed} in the app's settings and restart it.")
+        return (
+            f'The sandbox mode "{sandbox}" is not allowed in this app. '
+            f"Choose {allowed} in the app's settings and restart it."
+        )
     return ""
-
-

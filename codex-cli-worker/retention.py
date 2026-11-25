@@ -11,6 +11,7 @@ The rules, all in this one file so a reader can check them without the server:
 
 Nothing here touches the disk or the clock; the server passes in the chats, the time and the schedule facts.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -47,13 +48,17 @@ def seconds_of(value: Any) -> float | None:
     return moment.timestamp()
 
 
-def scheduled_activity(schedules: Iterable[Mapping[str, Any]], runs: Iterable[Mapping[str, Any]]) -> dict[str, float]:
+def scheduled_activity(
+    schedules: Iterable[Mapping[str, Any]], runs: Iterable[Mapping[str, Any]]
+) -> dict[str, float]:
     """Map each chat that has a schedule to the time its schedules last kept it in use.
 
     A schedule that is approved and enabled keeps its chat in use for good (ALWAYS_ACTIVE). Otherwise the chat's
     time is the latest run of any of its schedules; `created` is the run's time in epoch seconds.
     """
-    chat_of = {str(item.get("id")): str(item.get("chat_id") or "") for item in schedules}
+    chat_of = {
+        str(item.get("id")): str(item.get("chat_id") or "") for item in schedules
+    }
     result: dict[str, float] = {}
     for item in schedules:
         chat_id = str(item.get("chat_id") or "")
@@ -62,12 +67,18 @@ def scheduled_activity(schedules: Iterable[Mapping[str, Any]], runs: Iterable[Ma
     for run in runs:
         chat_id = chat_of.get(str(run.get("schedule_id")), "")
         created = run.get("created")
-        if chat_id and isinstance(created, (int, float)) and not isinstance(created, bool):
+        if (
+            chat_id
+            and isinstance(created, (int, float))
+            and not isinstance(created, bool)
+        ):
             result[chat_id] = max(result.get(chat_id, 0.0), float(created))
     return result
 
 
-def last_activity(task: Mapping[str, Any], scheduled: Mapping[str, float]) -> float | None:
+def last_activity(
+    task: Mapping[str, Any], scheduled: Mapping[str, float]
+) -> float | None:
     """Return when the chat last had a message or a scheduled run, or None when no time can be read."""
     times = [seconds_of(task.get(key)) for key in ("updated_at", "created_at")]
     times.append(scheduled.get(str(task.get("task_id") or "")))
@@ -75,7 +86,9 @@ def last_activity(task: Mapping[str, Any], scheduled: Mapping[str, float]) -> fl
     return max(known) if known else None
 
 
-def deletion_time(task: Mapping[str, Any], days: int, scheduled: Mapping[str, float]) -> float | None:
+def deletion_time(
+    task: Mapping[str, Any], days: int, scheduled: Mapping[str, float]
+) -> float | None:
     """Return when the chat is deleted if nothing happens (epoch seconds), or None if it is not on the way out."""
     if task.get("pinned"):
         return None
@@ -87,11 +100,16 @@ def deletion_time(task: Mapping[str, Any], days: int, scheduled: Mapping[str, fl
 
 def is_busy(task: Mapping[str, Any], active_ids: Iterable[str] = ()) -> bool:
     """Whether the chat is running or waiting to run, and so must not be deleted."""
-    return task.get("status") in BUSY_STATUSES or str(task.get("task_id") or "") in set(active_ids)
+    return task.get("status") in BUSY_STATUSES or str(task.get("task_id") or "") in set(
+        active_ids
+    )
 
 
 def expired_ids(
-    tasks: Iterable[Mapping[str, Any]], now: float, days: int, scheduled: Mapping[str, float],
+    tasks: Iterable[Mapping[str, Any]],
+    now: float,
+    days: int,
+    scheduled: Mapping[str, float],
     active_ids: Iterable[str] = (),
 ) -> list[str]:
     """Return the ids of the chats whose deletion time has come, oldest first."""
@@ -105,7 +123,10 @@ def expired_ids(
 
 
 def deletion_warning(
-    task: Mapping[str, Any], now: float, days: int, scheduled: Mapping[str, float],
+    task: Mapping[str, Any],
+    now: float,
+    days: int,
+    scheduled: Mapping[str, float],
 ) -> dict[str, Any] | None:
     """Return what the page shows for a chat in its last WARNING_DAYS days, or None.
 
@@ -115,6 +136,8 @@ def deletion_warning(
     if when is None or when <= now or when - now > WARNING_DAYS * SECONDS_PER_DAY:
         return None
     return {
-        "deletes_at": datetime.fromtimestamp(when, timezone.utc).isoformat(timespec="seconds"),
+        "deletes_at": datetime.fromtimestamp(when, timezone.utc).isoformat(
+            timespec="seconds"
+        ),
         "days_left": max(1, -int(-(when - now) // SECONDS_PER_DAY)),
     }

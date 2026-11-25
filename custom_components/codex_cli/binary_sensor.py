@@ -75,7 +75,10 @@ class CodexSignedInBinarySensor(
         """Set the unique ID and attach the sensor to the Codex device of the config entry."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_signed_in"
-        self._attr_device_info = {"identifiers": {(DOMAIN, entry.entry_id)}, "entry_type": DeviceEntryType.SERVICE}
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "entry_type": DeviceEntryType.SERVICE,
+        }
 
     @property
     def is_on(self) -> bool:

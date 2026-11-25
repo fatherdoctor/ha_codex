@@ -1,5 +1,7 @@
 """Stdio tools for schedule proposals and the schedule list, never approvals."""
+
 from __future__ import annotations
+
 import json
 import os
 import socket
@@ -9,19 +11,48 @@ from typing import Any
 import scheduling
 import tool_threads
 
-PROPOSAL: dict[str, Any] = {'type': 'object', 'additionalProperties': False,
-            'properties': {'name': {'type': 'string', 'maxLength': 80},
-                           'prompt': {'type': 'string', 'maxLength': 16000},
-                           'mode': {'enum': ['default', 'read-only']},
-                           'spec': {'type': 'object', 'description': 'interval: kind/seconds; cron: kind/expression (five numeric fields in the Home Assistant time zone); once: kind/at (an ISO time; without an offset it is in the Home Assistant time zone).'}},
-            'required': ['name', 'prompt', 'spec']}
+PROPOSAL: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "name": {"type": "string", "maxLength": 80},
+        "prompt": {"type": "string", "maxLength": 16000},
+        "mode": {"enum": ["default", "read-only"]},
+        "spec": {
+            "type": "object",
+            "description": "interval: kind/seconds; cron: kind/expression (five numeric fields in the Home Assistant time zone); once: kind/at (an ISO time; without an offset it is in the Home Assistant time zone).",
+        },
+    },
+    "required": ["name", "prompt", "spec"],
+}
 # No minimum or maximum here: a limit outside 1-20 is clamped by the service
 # (a larger one returns 20 items and a next_offset), never refused.
-LIMIT: dict[str, Any] = {'type': 'integer', 'description': 'Items per page, 1-20 (default 10). A larger number returns 20 items and a next_offset to continue from.'}
+LIMIT: dict[str, Any] = {
+    "type": "integer",
+    "description": "Items per page, 1-20 (default 10). A larger number returns 20 items and a next_offset to continue from.",
+}
 TOOLS: list[dict[str, Any]] = [
-    {'name': 'propose_schedule', 'description': 'Save a schedule. A one-time wakeup (kind once) is on when saved and runs in this chat at its time. A repeating schedule remains disabled until a Home Assistant administrator approves its exact current contents on the page; this tool cannot approve or activate it. The answer gives next_run in the Home Assistant time zone.', 'inputSchema': PROPOSAL},
-    {'name': 'list_schedules', 'description': 'Read a bounded page of schedule summaries: active, paused and waiting ones first, then one-time wakeups that already ran. This does not enable or change schedules.',
-     'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {'offset': {'type': 'integer', 'minimum': 0, 'maximum': scheduling.LISTED}, 'limit': LIMIT}}},
+    {
+        "name": "propose_schedule",
+        "description": "Save a schedule. A one-time wakeup (kind once) is on when saved and runs in this chat at its time. A repeating schedule remains disabled until a Home Assistant administrator approves its exact current contents on the page; this tool cannot approve or activate it. The answer gives next_run in the Home Assistant time zone.",
+        "inputSchema": PROPOSAL,
+    },
+    {
+        "name": "list_schedules",
+        "description": "Read a bounded page of schedule summaries: active, paused and waiting ones first, then one-time wakeups that already ran. This does not enable or change schedules.",
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": scheduling.LISTED,
+                },
+                "limit": LIMIT,
+            },
+        },
+    },
 ]
 
 
@@ -31,51 +62,82 @@ def fetch(name: Any, arguments: Any, thread_id: str) -> Any:
     The name and the arguments come from Codex unchecked, so they are checked here first; each refusal is a
     ValueError with a fixed sentence.
     """
-    tool = next((t for t in TOOLS if t['name'] == name), None)
+    tool = next((t for t in TOOLS if t["name"] == name), None)
     if tool is None:
-        raise ValueError('Unknown scheduling tool; the tools are ' + ', '.join(t['name'] for t in TOOLS) + '.')
-    allowed = tool['inputSchema']['properties']
+        raise ValueError(
+            "Unknown scheduling tool; the tools are "
+            + ", ".join(t["name"] for t in TOOLS)
+            + "."
+        )
+    allowed = tool["inputSchema"]["properties"]
     if not isinstance(arguments, dict) or set(arguments) - set(allowed):
-        raise ValueError(f'{name} accepts only these arguments: ' + ', '.join(allowed) + '.')
-    data = json.dumps({'operation': name, 'arguments': arguments, 'thread_id': thread_id}).encode() + b'\n'
+        raise ValueError(
+            f"{name} accepts only these arguments: " + ", ".join(allowed) + "."
+        )
+    data = (
+        json.dumps(
+            {"operation": name, "arguments": arguments, "thread_id": thread_id}
+        ).encode()
+        + b"\n"
+    )
     if len(data) > 65536:
-        raise ValueError('The request is larger than 64 KiB.')
+        raise ValueError("The request is larger than 64 KiB.")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(10)
-        client.connect(os.environ.get('CODEX_SCHEDULE_SOCKET', '/data/schedules.sock'))
+        client.connect(os.environ.get("CODEX_SCHEDULE_SOCKET", "/data/schedules.sock"))
         client.sendall(data)
-        with client.makefile('rb') as response:
+        with client.makefile("rb") as response:
             raw = response.readline(65537)
     if not raw or len(raw) > 65536:
-        raise ValueError('The scheduling service sent no usable answer.')
+        raise ValueError("The scheduling service sent no usable answer.")
     return json.loads(raw)
 
 
 def respond(request: dict[str, Any]) -> dict[str, Any]:
     """Return the result of one MCP request; raise ValueError for a method this server does not have."""
-    method = request.get('method')
-    if method == 'initialize':
-        return {'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'codex_scheduling', 'version': '1'}}
-    if method == 'ping':
+    method = request.get("method")
+    if method == "initialize":
+        return {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "codex_scheduling", "version": "1"},
+        }
+    if method == "ping":
         return {}
-    if method == 'tools/list':
-        return {'tools': TOOLS}
-    if method == 'tools/call':
+    if method == "tools/list":
+        return {"tools": TOOLS}
+    if method == "tools/call":
         try:
-            params = request.get('params', {})
-            result = fetch(params.get('name'), params.get('arguments', {}), tool_threads.thread_id_from_call(params))
+            params = request.get("params", {})
+            result = fetch(
+                params.get("name"),
+                params.get("arguments", {}),
+                tool_threads.thread_id_from_call(params),
+            )
         except OSError:
-            result = {'ok': False, 'error': 'The scheduling service is not reachable; the add-on may be restarting.'}
+            result = {
+                "ok": False,
+                "error": "The scheduling service is not reachable; the add-on may be restarting.",
+            }
         except json.JSONDecodeError:
             # A JSONDecodeError is a ValueError, so it is caught first.
-            result = {'ok': False, 'error': 'The scheduling service sent no usable answer.'}
+            result = {
+                "ok": False,
+                "error": "The scheduling service sent no usable answer.",
+            }
         except ValueError as exc:
             # fetch() raises only the fixed sentences above.
-            result = {'ok': False, 'error': str(exc)}
+            result = {"ok": False, "error": str(exc)}
         except (TypeError, AttributeError):
-            result = {'ok': False, 'error': 'A tool call needs params with a name and an arguments object.'}
-        return {'content': [{'type': 'text', 'text': json.dumps(result)}], 'isError': not result.get('ok')}
-    raise ValueError('Unsupported method')
+            result = {
+                "ok": False,
+                "error": "A tool call needs params with a name and an arguments object.",
+            }
+        return {
+            "content": [{"type": "text", "text": json.dumps(result)}],
+            "isError": not result.get("ok"),
+        }
+    raise ValueError("Unsupported method")
 
 
 def main() -> int:
@@ -85,18 +147,22 @@ def main() -> int:
             return 1
         try:
             request = json.loads(raw)
-            if not isinstance(request, dict) or 'id' not in request:
+            if not isinstance(request, dict) or "id" not in request:
                 continue
-            response = {'jsonrpc': '2.0', 'id': request['id']}
+            response = {"jsonrpc": "2.0", "id": request["id"]}
             try:
-                response['result'] = respond(request)
+                response["result"] = respond(request)
             except (ValueError, TypeError, AttributeError):
-                response['error'] = {'code': -32601, 'message': 'Unsupported request'}
+                response["error"] = {"code": -32601, "message": "Unsupported request"}
         except (ValueError, UnicodeError):
-            response = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'Invalid JSON'}}
+            response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "Invalid JSON"},
+            }
         print(json.dumps(response), flush=True)
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

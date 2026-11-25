@@ -19,32 +19,33 @@ setup fails, Codex starts without the custom name and the page explains why.
 from __future__ import annotations
 
 import base64
+from collections import deque
+from collections.abc import Callable
 import io
-import stat
 import json
-import urllib.parse
 import os
+from pathlib import Path
 import re
 import signal
 import socket
+import stat
 import subprocess
 import tempfile
 import threading
 import time
-from collections import deque
-from collections.abc import Callable
-from pathlib import Path
 from typing import Any
-
-import websocket
+import urllib.parse
 
 from app_paths import CONFIG_ROOT
+import websocket
 
 # Remote control is paused in this version (the ChatGPT app could read a chat but not reply while this app kept it loaded). While
 # PAUSED is True the remote-control process never starts and the owner's saved choice is kept untouched, so turning
 # it back on in a later version is this one line. The tests set it to False to check the code that returns.
 PAUSED = True
-PAUSED_MESSAGE = "Remote Control is paused while we fix it. It will come back in a later version."
+PAUSED_MESSAGE = (
+    "Remote Control is paused while we fix it. It will come back in a later version."
+)
 PAUSED_KEPT_LOG = "Remote Control is paused in this version; your setting is kept for when it returns."
 
 CONTROL_FOLDER = "remote_control_control"
@@ -64,13 +65,18 @@ LOG_LINES = 40
 # HA_*_CAPABILITY keeps it from each command's environment, but a command that runs outside the sandbox can read
 # the environment of the relay's Codex process.
 STRIPPED_ENV = (
-    "SUPERVISOR_TOKEN", "HASSIO_TOKEN",
-    "HA_VERIFICATION_CAPABILITY", "HA_DATA_CAPABILITY", "HA_DATA_SOCKET",
+    "SUPERVISOR_TOKEN",
+    "HASSIO_TOKEN",
+    "HA_VERIFICATION_CAPABILITY",
+    "HA_DATA_CAPABILITY",
+    "HA_DATA_SOCKET",
 )
 
 PAIRING_RE = re.compile(r"Pairing code:\s*([A-Za-z0-9][A-Za-z0-9-]{3,31})")
 AVAILABLE_RE = re.compile(r"available for remote control as\s+(.+?)\.?\s*$")
-ERROR_RE = re.compile(r"connection is errored|pairing failed|auth failed|error", re.IGNORECASE)
+ERROR_RE = re.compile(
+    r"connection is errored|pairing failed|auth failed|error", re.IGNORECASE
+)
 # Long opaque strings (tokens, keys) are hidden from the log shown on the page.
 SECRET_RE = re.compile(r"[A-Za-z0-9_\-+/=.]{32,}")
 
@@ -84,7 +90,10 @@ def machine_name(value: Any) -> str:
     """
     text = re.sub(r"[^A-Za-z0-9 ._-]", " ", str(value or ""))
     text = re.sub(r"\s+", " ", text).strip(" .-_")
-    return text.encode("ascii")[:MAX_NAME_BYTES].decode("ascii").rstrip(" .-_") or DEFAULT_NAME
+    return (
+        text.encode("ascii")[:MAX_NAME_BYTES].decode("ascii").rstrip(" .-_")
+        or DEFAULT_NAME
+    )
 
 
 def fallback_name(name: str) -> str:
@@ -99,9 +108,31 @@ RELAY_BWRAP = "/opt/codex-sandbox/relay-bwrap"
 
 def build_command(codex_binary: str, name: str, *args: str) -> list[str]:
     """Enter the relay label, preserve device nodes, then drop namespace setup caps."""
-    return [RELAY_LAUNCHER, RELAY_BWRAP, "--unshare-user", "--uid", "1000", "--gid", "1000", "--unshare-uts",
-            "--hostname", name, "--bind", "/", "/", "--dev", "/dev", "--bind-try", "/dev/shm", "/dev/shm",
-            "--cap-drop", "ALL", "--", codex_binary, *args]
+    return [
+        RELAY_LAUNCHER,
+        RELAY_BWRAP,
+        "--unshare-user",
+        "--uid",
+        "1000",
+        "--gid",
+        "1000",
+        "--unshare-uts",
+        "--hostname",
+        name,
+        "--bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--bind-try",
+        "/dev/shm",
+        "/dev/shm",
+        "--cap-drop",
+        "ALL",
+        "--",
+        codex_binary,
+        *args,
+    ]
 
 
 def prepare_control_parent(data_root: Path) -> Path:
@@ -109,9 +140,14 @@ def prepare_control_parent(data_root: Path) -> Path:
     parent = data_root / CONTROL_FOLDER
     parent.mkdir(mode=0o700, exist_ok=True)
     info = parent.lstat()
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
-            or stat.S_IMODE(info.st_mode) != 0o700):
-        raise OSError("The private control folder must be owned by the worker with mode 0700.")
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise OSError(
+            "The private control folder must be owned by the worker with mode 0700."
+        )
     return parent
 
 
@@ -130,8 +166,10 @@ TOOL_KEY_EXCLUDE = "HA_*_CAPABILITY"
 
 def redact(line: str, keep: str = "") -> str:
     """Hide long opaque strings in one output line, keeping the pairing code readable."""
+
     def hide(match: re.Match[str]) -> str:
         return match.group(0) if keep and match.group(0) == keep else "[hidden]"
+
     return SECRET_RE.sub(hide, line.rstrip("\r\n"))
 
 
@@ -147,7 +185,9 @@ def qr_data_url(text: str) -> str:
     qr.make(fit=True)
     buffer = io.BytesIO()
     qr.make_image(image_factory=SvgPathFillImage).save(buffer)
-    return "data:image/svg+xml;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    return "data:image/svg+xml;base64," + base64.b64encode(buffer.getvalue()).decode(
+        "ascii"
+    )
 
 
 class ControlError(Exception):
@@ -172,14 +212,20 @@ class ControlClient:
         raw.settimeout(1.0)
         try:
             raw.connect(str(path))
-            return websocket.create_connection("ws://localhost/", socket=raw, timeout=1.0,
-                                               suppress_origin=True)
+            return websocket.create_connection(
+                "ws://localhost/", socket=raw, timeout=1.0, suppress_origin=True
+            )
         except Exception:
             raw.close()
             raise
 
-    def _request(self, method: str, params: dict[str, Any], timeout: float,
-                 cancelled: Callable[[], bool]) -> dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        params: dict[str, Any],
+        timeout: float,
+        cancelled: Callable[[], bool],
+    ) -> dict[str, Any]:
         transport = None
         deadline = time.monotonic() + timeout
         try:
@@ -188,45 +234,72 @@ class ControlClient:
             transport = self.connector(self.path)
             transport.settimeout(1.0)
 
-            def request(identifier: int, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-                transport.send(json.dumps({"id": identifier, "method": name, "params": arguments}))
+            def request(
+                identifier: int, name: str, arguments: dict[str, Any]
+            ) -> dict[str, Any]:
+                transport.send(
+                    json.dumps({"id": identifier, "method": name, "params": arguments})
+                )
                 while time.monotonic() < deadline and not cancelled():
                     try:
                         frame = transport.recv()
                     except (TimeoutError, websocket.WebSocketTimeoutException):
                         continue
                     if not frame or len(frame) > 1024 * 1024:
-                        raise ControlError("The Codex control connection closed or returned an oversized response.")
+                        raise ControlError(
+                            "The Codex control connection closed or returned an oversized response."
+                        )
                     message = json.loads(frame)
                     if not isinstance(message, dict) or message.get("id") != identifier:
                         continue  # Status notifications are not replies to this request.
-                    if "error" in message or not isinstance(message.get("result"), dict):
-                        raise ControlError("This Codex control request was refused or is unsupported.")
+                    if "error" in message or not isinstance(
+                        message.get("result"), dict
+                    ):
+                        raise ControlError(
+                            "This Codex control request was refused or is unsupported."
+                        )
                     return message["result"]
-                raise ControlError("The Codex control request timed out or remote control stopped.")
+                raise ControlError(
+                    "The Codex control request timed out or remote control stopped."
+                )
 
-            request(1, "initialize", {"clientInfo": {"name": "ha_codex", "version": "0.166.0"},
-                                      "capabilities": {"experimentalApi": True}})
+            request(
+                1,
+                "initialize",
+                {
+                    "clientInfo": {"name": "ha_codex", "version": "0.166.0"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            )
             transport.send(json.dumps({"method": "initialized"}))
             return request(2, method, params)
         except ControlError:
             raise
         except Exception:
-            raise ControlError("Could not reach this process's Codex control socket.") from None
+            raise ControlError(
+                "Could not reach this process's Codex control socket."
+            ) from None
         finally:
             if transport is not None:
                 transport.close(timeout=0)
 
     def enable(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
-        return self._request("remoteControl/enable", {"ephemeral": True}, 5.0, cancelled)
+        return self._request(
+            "remoteControl/enable", {"ephemeral": True}, 5.0, cancelled
+        )
 
     def status(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
         return self._request("remoteControl/status/read", {}, 5.0, cancelled)
 
     def pair(self, cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
-        reply = self._request("remoteControl/pairing/start", {"manualCode": True}, 35.0, cancelled)
+        reply = self._request(
+            "remoteControl/pairing/start", {"manualCode": True}, 35.0, cancelled
+        )
         # The opaque pairingCode is for QR clients, not a code a person can type.
-        return {"manualPairingCode": reply.get("manualPairingCode"), "pairingCode": reply.get("pairingCode")}
+        return {
+            "manualPairingCode": reply.get("manualPairingCode"),
+            "pairingCode": reply.get("pairingCode"),
+        }
 
 
 class Supervisor:
@@ -273,9 +346,17 @@ class Supervisor:
         self.proc: Any = None
         self.thread: threading.Thread | None = None
         self.log: deque[str] = deque(maxlen=LOG_LINES)
-        self.status: dict[str, Any] = {"state": "off", "message": "Remote control is off.", "pairing_code": "",
-                                       "machine_name": "", "restarts": 0, "since": None,
-                                       "name_state": "unchecked", "name_warning": "", "policy_warning": ""}
+        self.status: dict[str, Any] = {
+            "state": "off",
+            "message": "Remote control is off.",
+            "pairing_code": "",
+            "machine_name": "",
+            "restarts": 0,
+            "since": None,
+            "name_state": "unchecked",
+            "name_warning": "",
+            "policy_warning": "",
+        }
         self._name_supported: bool | None = None
         self._checked_name = ""
 
@@ -284,7 +365,10 @@ class Supervisor:
     def enabled(self) -> bool:
         """Return whether the owner turned remote control on; off when nothing was saved."""
         try:
-            return json.loads(self.state_path.read_text(encoding="utf-8")).get("enabled") is True
+            return (
+                json.loads(self.state_path.read_text(encoding="utf-8")).get("enabled")
+                is True
+            )
         except (OSError, ValueError, AttributeError):
             return False
 
@@ -348,27 +432,49 @@ class Supervisor:
         if not self.enabled():
             return False, {**self.snapshot(), "error": "Turn remote control on first."}
         if proc is None or proc.poll() is not None or path is None:
-            return False, {**self.snapshot(), "error": "Remote control is still starting or reconnecting. Wait for the connected state, then try again."}
-        cancelled = lambda: self.wake.is_set() or proc.poll() is not None or not self.enabled()
+            return False, {
+                **self.snapshot(),
+                "error": "Remote control is still starting or reconnecting. Wait for the connected state, then try again.",
+            }
+        cancelled = lambda: (
+            self.wake.is_set() or proc.poll() is not None or not self.enabled()
+        )
         try:
             reply = self.control_factory(path).pair(cancelled=cancelled)
             code = reply.get("manualPairingCode")
-            if not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{3,63}", code):
-                raise ControlError("Codex returned no code that can be typed in the ChatGPT app.")
+            if not isinstance(code, str) or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9-]{3,63}", code
+            ):
+                raise ControlError(
+                    "Codex returned no code that can be typed in the ChatGPT app."
+                )
             with self.lock:
                 if self.proc is not proc or self.control_socket != path or cancelled():
-                    raise ControlError("Remote control restarted or stopped while pairing.")
+                    raise ControlError(
+                        "Remote control restarted or stopped while pairing."
+                    )
                 self.status["pairing_code"] = code
-                opaque = reply.get('pairingCode')
-                url = ('https://chatgpt.com/codex/pair?pairing_code=' + urllib.parse.quote(opaque, safe='')) \
-                    if isinstance(opaque, str) and 0 < len(opaque) <= 2048 else ''
-                self.status['pairing_url'] = url if len(url.encode('utf-8')) <= 2048 else ''
+                opaque = reply.get("pairingCode")
+                url = (
+                    (
+                        "https://chatgpt.com/codex/pair?pairing_code="
+                        + urllib.parse.quote(opaque, safe="")
+                    )
+                    if isinstance(opaque, str) and 0 < len(opaque) <= 2048
+                    else ""
+                )
+                self.status["pairing_url"] = (
+                    url if len(url.encode("utf-8")) <= 2048 else ""
+                )
                 self.log.append("A new pairing code is ready on this page.")
             return True, self.snapshot()
         except Exception:
             # Never echo a raw RPC error: it may contain a code or relay credential.
-            return False, {**self.snapshot(), "error": "Codex could not provide a new pairing code. "
-                           "Check that remote control is connected, then try again."}
+            return False, {
+                **self.snapshot(),
+                "error": "Codex could not provide a new pairing code. "
+                "Check that remote control is connected, then try again.",
+            }
 
     # Process ------------------------------------------------------------------------------------
 
@@ -378,7 +484,11 @@ class Supervisor:
         with self.lock:
             if self.status.get("name_warning") != warning:
                 self.log.append(warning)
-            self.status.update(name_state="namespace-unavailable", name_warning=warning, machine_name="")
+            self.status.update(
+                name_state="namespace-unavailable",
+                name_warning=warning,
+                machine_name="",
+            )
 
     def _command(self, *args: str) -> list[str]:
         """Probe only the namespace setup, once per chosen name; never treat a Codex exit as the probe."""
@@ -386,9 +496,15 @@ class Supervisor:
         if self._name_supported is None or self._checked_name != name:
             self._checked_name = name
             try:
-                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()),
-                                 cwd=self.workdir_factory(),
-                                 capture_output=True, text=True, timeout=10, check=False)
+                probe = self.run(
+                    build_command("/bin/true", name),
+                    env=remote_env(self.env_factory()),
+                    cwd=self.workdir_factory(),
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
                 self._name_supported = probe.returncode == 0
             except (OSError, subprocess.SubprocessError):
                 self._name_supported = False
@@ -398,10 +514,17 @@ class Supervisor:
             else:
                 self._name_failed()
         instructions = self.instructions_factory()
-        config = ("-c", "developer_instructions=" + json.dumps(instructions)) if instructions else ()
+        config = (
+            ("-c", "developer_instructions=" + json.dumps(instructions))
+            if instructions
+            else ()
+        )
         arguments = (*config, *self.tool_args_factory(), *args)
-        return (build_command(self.codex_binary, name, *arguments) if self._name_supported
-                else [RELAY_LAUNCHER, "--plain", self.codex_binary, *arguments])
+        return (
+            build_command(self.codex_binary, name, *arguments)
+            if self._name_supported
+            else [RELAY_LAUNCHER, "--plain", self.codex_binary, *arguments]
+        )
 
     def _launch(self) -> dict[str, Any]:
         """Start the supervising thread unless one is already running, or report the pause."""
@@ -411,7 +534,9 @@ class Supervisor:
             if self.thread is not None and self.thread.is_alive():
                 return self.snapshot()
             self.wake.clear()
-            self.thread = threading.Thread(target=self._loop, name="remote-control", daemon=True)
+            self.thread = threading.Thread(
+                target=self._loop, name="remote-control", daemon=True
+            )
             self.set_status("starting", "Starting remote control…", pairing_code="")
             self.thread.start()
         return self.snapshot()
@@ -422,8 +547,10 @@ class Supervisor:
         while self.enabled() and not self.wake.is_set():
             name = machine_name(self.name_factory())
             with self.lock:
-                self.log.append("Managed policy: a disallowed relay full-access request may be downgraded to read-only; "
-                                "the relay does not expose every thread warning here.")
+                self.log.append(
+                    "Managed policy: a disallowed relay full-access request may be downgraded to read-only; "
+                    "the relay does not expose every thread warning here."
+                )
             started = self.clock()
             private = None
             done = threading.Event()
@@ -435,17 +562,25 @@ class Supervisor:
                 path = Path(private.name) / "rc.sock"
                 # Namespace probing and environment refresh can call Supervisor.
                 # Keep both outside the lock used by snapshot, reads and stop.
-                command = self._command("app-server", "--listen", f"unix://{path}", "--remote-control")
+                command = self._command(
+                    "app-server", "--listen", f"unix://{path}", "--remote-control"
+                )
                 # A launch's read session starts here and nowhere else: a probe must not end the running relay's.
                 environment = remote_env(self.launch_env_factory())
                 with self.lock:
                     if self.wake.is_set() or not self.enabled():
                         private.cleanup()
                         return
-                    proc = self.popen(command,
-                                      env=environment, cwd=self.workdir_factory(), stdin=subprocess.DEVNULL,
-                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                      start_new_session=True)
+                    proc = self.popen(
+                        command,
+                        env=environment,
+                        cwd=self.workdir_factory(),
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        start_new_session=True,
+                    )
                     self.proc = proc
                     self.control_socket = path
                     self.status["pairing_code"] = ""
@@ -453,16 +588,29 @@ class Supervisor:
                 self.set_status("error", f"Remote control could not start: {exc}")
                 proc = None
             if proc is not None:
-                self.set_status("connecting", (f"Connecting as “{name}”…" if self._name_supported else
-                                               "Connecting without a custom machine name…"),
-                                machine_name=name if self._name_supported else "")
-                monitor = threading.Thread(target=self._monitor_control, args=(proc, path, done),
-                                           name="remote-control-status", daemon=True)
+                self.set_status(
+                    "connecting",
+                    (
+                        f"Connecting as “{name}”…"
+                        if self._name_supported
+                        else "Connecting without a custom machine name…"
+                    ),
+                    machine_name=name if self._name_supported else "",
+                )
+                monitor = threading.Thread(
+                    target=self._monitor_control,
+                    args=(proc, path, done),
+                    name="remote-control-status",
+                    daemon=True,
+                )
                 monitor.start()
                 namespace_error = False
                 for line in iter(proc.stdout.readline, ""):
                     if line.lstrip().startswith("bwrap:") and re.search(
-                            r"namespace|hostname|Operation not permitted|Permission denied", line, re.IGNORECASE):
+                        r"namespace|hostname|Operation not permitted|Permission denied",
+                        line,
+                        re.IGNORECASE,
+                    ):
                         namespace_error = True
                     self._parse(line)
                 code = proc.wait()
@@ -478,7 +626,9 @@ class Supervisor:
                 if namespace_error and self._name_supported:
                     self._name_failed()
                     continue  # One plain launch; no namespace exit-1/backoff loop.
-                self.set_status("error", f"Remote control stopped (exit code {code}); restarting.")
+                self.set_status(
+                    "error", f"Remote control stopped (exit code {code}); restarting."
+                )
             if proc is None and private is not None:
                 private.cleanup()
             if self.clock() - started >= HEALTHY_RUN:
@@ -491,28 +641,48 @@ class Supervisor:
 
     def _monitor_control(self, proc: Any, path: Path, done: threading.Event) -> None:
         """Read readiness from the owned server, not human-oriented stdout or a daemon socket."""
-        cancelled = lambda: done.is_set() or self.wake.is_set() or proc.poll() is not None or not self.enabled()
+        cancelled = lambda: (
+            done.is_set()
+            or self.wake.is_set()
+            or proc.poll() is not None
+            or not self.enabled()
+        )
         enabled = False
         while not cancelled():
             try:
                 client = self.control_factory(path)
-                reply = client.status(cancelled=cancelled) if enabled else client.enable(cancelled=cancelled)
+                reply = (
+                    client.status(cancelled=cancelled)
+                    if enabled
+                    else client.enable(cancelled=cancelled)
+                )
                 enabled = True
                 with self.lock:
                     if cancelled() or self.proc is not proc:
                         return
                     state = reply.get("status")
                     if state == "connected":
-                        name = machine_name(reply.get("serverName") or self.name_factory())
-                        self.set_status("ready", f"Available in the ChatGPT app as “{name}”.", machine_name=name)
+                        name = machine_name(
+                            reply.get("serverName") or self.name_factory()
+                        )
+                        self.set_status(
+                            "ready",
+                            f"Available in the ChatGPT app as “{name}”.",
+                            machine_name=name,
+                        )
                     elif state == "connecting":
                         self.set_status("connecting", "Connecting remote control…")
                     else:
                         enabled = False
-                        self.set_status("error", "Codex remote control is not connected. Check sign-in and try again.")
+                        self.set_status(
+                            "error",
+                            "Codex remote control is not connected. Check sign-in and try again.",
+                        )
             except Exception:
                 if not cancelled():
-                    self.set_status("connecting", "Waiting for this process's Codex control socket…")
+                    self.set_status(
+                        "connecting", "Waiting for this process's Codex control socket…"
+                    )
             if done.wait(1.0 if not enabled else 5.0):
                 return
 
@@ -520,7 +690,11 @@ class Supervisor:
         """End the process group: Ctrl-C first, then terminate, then kill."""
         if proc is None or proc.poll() is not None:
             return
-        for sig, wait in ((signal.SIGINT, STOP_GRACE), (signal.SIGTERM, 5.0), (signal.SIGKILL, 5.0)):
+        for sig, wait in (
+            (signal.SIGINT, STOP_GRACE),
+            (signal.SIGTERM, 5.0),
+            (signal.SIGKILL, 5.0),
+        ):
             try:
                 os.killpg(proc.pid, sig)
             except (ProcessLookupError, PermissionError, OSError):
@@ -538,19 +712,28 @@ class Supervisor:
         """Record one output line and update the state from it; return a pairing code found in it."""
         lower = line.lower()
         policy_downgrade = False
-        if "disallowed by requirements" in lower and "falling back to required value" in lower:
+        if (
+            "disallowed by requirements" in lower
+            and "falling back to required value" in lower
+        ):
             for setting in ("approval_policy", "permission_profile"):
                 if setting not in lower:
                     continue
-                target = "the required approval policy" if setting == "approval_policy" else "the managed restricted profile"
+                target = (
+                    "the required approval policy"
+                    if setting == "approval_policy"
+                    else "the managed restricted profile"
+                )
                 warning = f"Codex reported that a {setting} request was downgraded to {target}."
                 with self.lock:
                     self.status["policy_warning"] = warning
                     self.log.append(warning)
                 policy_downgrade = True
-        elif ("configwarning" in lower or "warning" in lower) and (
-                "read-only" in lower or "readonly" in lower) and (
-                "fall" in lower or "downgrad" in lower or "not allowed" in lower):
+        elif (
+            ("configwarning" in lower or "warning" in lower)
+            and ("read-only" in lower or "readonly" in lower)
+            and ("fall" in lower or "downgrad" in lower or "not allowed" in lower)
+        ):
             warning = "Codex reported that a request was downgraded to read-only by the managed policy."
             with self.lock:
                 self.status["policy_warning"] = warning
@@ -559,15 +742,29 @@ class Supervisor:
         code_match = PAIRING_RE.search(line)
         code = code_match.group(1) if code_match else ""
         with self.lock:
-            self.log.append("A pairing code is ready on this page." if code else redact(line))
+            self.log.append(
+                "A pairing code is ready on this page." if code else redact(line)
+            )
         if code:
-            self.set_status("pairing", "Enter this pairing code in the ChatGPT app.", pairing_code=code, pairing_url="")
+            self.set_status(
+                "pairing",
+                "Enter this pairing code in the ChatGPT app.",
+                pairing_code=code,
+                pairing_url="",
+            )
             return code
         available = AVAILABLE_RE.search(line)
         if available:
-            self.set_status("ready", f"Available in the ChatGPT app as “{available.group(1)}”.",
-                            machine_name=available.group(1))
-        elif not policy_downgrade and ERROR_RE.search(line) and self.status.get("state") not in {"ready"}:
+            self.set_status(
+                "ready",
+                f"Available in the ChatGPT app as “{available.group(1)}”.",
+                machine_name=available.group(1),
+            )
+        elif (
+            not policy_downgrade
+            and ERROR_RE.search(line)
+            and self.status.get("state") not in {"ready"}
+        ):
             self.set_status("error", redact(line))
         return ""
 
@@ -595,6 +792,8 @@ class Supervisor:
             "blocked_reason": "",
             "configured_name": machine_name(self.name_factory()),
             "pairing_url": status.get("pairing_url", "") if code else "",
-            "pairing_qr": qr_data_url(status.get("pairing_url") or code) if code else "",
+            "pairing_qr": qr_data_url(status.get("pairing_url") or code)
+            if code
+            else "",
             "log": log,
         }

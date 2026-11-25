@@ -370,7 +370,9 @@ class HomeAssistantData:
         finally:
             self.execution_lock.release()
 
-    def read_exchange_info(self, task_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def read_exchange_info(
+        self, task_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         """Return the running exchange's notes. It reads no Home Assistant data and has no query budget."""
         if set(payload) - {"operation", "thread_id"}:
             raise DataError("exchange_info takes no arguments")
@@ -383,8 +385,15 @@ class HomeAssistantData:
             }
         return {"status": "observed", "operation": "exchange_info", **info}
 
-    def save_result(self, task_id: str, capability: str, operation: str, query: dict[str, Any],
-                    result: dict[str, Any], encoded: bytes) -> dict[str, Any]:
+    def save_result(
+        self,
+        task_id: str,
+        capability: str,
+        operation: str,
+        query: dict[str, Any],
+        result: dict[str, Any],
+        encoded: bytes,
+    ) -> dict[str, Any]:
         """Atomically save redacted data for this turn and return a small model-visible receipt.
 
         The CLI truncates large tool outputs, including file reads. Keep the data
@@ -661,7 +670,9 @@ class HomeAssistantData:
             }
         return self.result("statistics", query, series)
 
-    def result(self, operation: str, query: dict[str, Any], series: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    def result(
+        self, operation: str, query: dict[str, Any], series: dict[str, dict[str, Any]]
+    ) -> dict[str, Any]:
         """Share the point budget fairly, reporting exact truncation and empty/missing series."""
         # Water-fill the shared budget: short/empty series release their unused
         # share, and integer remainders go to the remaining series in ID order.
