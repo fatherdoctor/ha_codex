@@ -40,6 +40,8 @@ SIZE_EXEMPT = {
     "codex-cli-worker/server.py": "the app's whole API; split in the 0.6 refactor",
     "codex-cli-worker/web/assets/chat.js": "the whole chat page; split in the 0.6 refactor",
     "codex-cli-worker/web/assets/chat.css": "the whole chat page; split in the 0.6 refactor",
+    "codex-cli-worker/web/assets/chat-settings.js": "the Settings window, cut from chat.js; the cut design "
+    "(CX-RF-JS) keeps it as one file of about 1,200 lines",
     "codex-cli-worker/github_access.py": "GitHub sign-in and repository access; split in the 0.6 refactor",
     "codex-cli-worker/tests/test_server.py": "follows server.py; split with it",
     "codex-cli-worker/tests/test_approvals.py": "split in the 0.6 refactor",
