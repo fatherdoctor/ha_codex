@@ -42,6 +42,8 @@ jobs:
           echo "NODE_PATH=$RUNNER_TEMP/browser-deps/node_modules" >> "$GITHUB_ENV"
       - name: Find the test browser
         run: echo "HA_BROWSER_EXECUTABLE=$(node -e 'console.log(require("playwright").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Code checks (file size, globals by name, server.py patch count)
+        run: python scripts/code_checks.py
       - name: Test worker and real Home Assistant authentication/frontend
         env:
           HA_BROWSER_NODE: node
