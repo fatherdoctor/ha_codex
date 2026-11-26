@@ -380,10 +380,10 @@ class BackupFolder(Sandbox):
         self.assertEqual(server.private_writable_root(run_dir / "backups"), [],
                          "a link out of the task folder is never a root")
 
-    def test_the_task_roots_stay_config_and_share(self):
+    def test_the_task_roots_are_config_share_media_agents_and_addon_config(self):
         # The turn's exact writableRoots in each mode are checked by behavior in test_chat_files.py
         # (test_workspace_write_can_write_in_the_folder_only), not by comparing source lines here.
-        self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/homeassistant", "/share"))
+        self.assertEqual(server.TASK_WRITABLE_ROOTS, ("/homeassistant", "/share", "/media", "/media/.agents", "/addon_config"))
 
 
 if __name__ == "__main__":

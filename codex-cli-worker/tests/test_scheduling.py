@@ -1,7 +1,9 @@
 """Schedule time edges, durable reservations, owner authority and agent boundaries."""
+import ast
 import concurrent.futures
 import copy
 from datetime import datetime, timezone
+import inspect
 import io
 import os
 from pathlib import Path
@@ -372,3 +374,76 @@ class SchedulingApiTests(unittest.TestCase):
         self.assertEqual(kwargs['turn_params']['approvalPolicy'], 'on-request')
         args = server.build_app_server_args()
         self.assertTrue(any('scheduling_mcp.py' in a for a in args))
+
+
+class ScheduleWorkerInterfaceTests(unittest.TestCase):
+    """ScheduleWorker lists exactly what schedule_api.py reads from the worker, and server.py has each name."""
+
+    def setUp(self):
+        """Collect the names of the interface and the names that the module reads from the worker."""
+        tree = ast.parse(Path(schedule_api.__file__).read_text(encoding='utf-8'))
+        interface = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'ScheduleWorker')
+        self.methods = {node.name for node in interface.body if isinstance(node, ast.FunctionDef)}
+        self.values = {node.target.id for node in interface.body if isinstance(node, ast.AnnAssign)}
+
+        def reads_worker(node):
+            """True for `self.worker.<name>` and for `worker.<name>`, the two ways the module holds the worker."""
+            held = node.value
+            if isinstance(held, ast.Name):
+                return held.id == 'worker'
+            return (isinstance(held, ast.Attribute) and held.attr == 'worker'
+                    and isinstance(held.value, ast.Name) and held.value.id == 'self')
+
+        self.used = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute) and reads_worker(node)}
+
+    def test_the_interface_lists_each_name_that_the_module_reads_and_no_other(self):
+        """A new use of the worker must be added to the interface; a name no longer used must leave it."""
+        self.assertEqual(self.used, self.methods | self.values)
+
+    def test_the_worker_has_each_listed_name(self):
+        """server.py defines each method as a function and each value as a module global."""
+        for name in self.methods:
+            self.assertTrue(inspect.isfunction(getattr(server, name, None)), name)
+        for name in self.values:
+            self.assertTrue(hasattr(server, name), name)
+
+    def test_each_listed_method_takes_the_arguments_that_the_worker_takes(self):
+        """A method of the interface and the function in server.py have the same parameters.
+
+        Where server.py gives a return type, it is the same too; two functions there have no hints yet.
+        """
+        for name in sorted(self.methods):
+            declared = inspect.signature(getattr(schedule_api.ScheduleWorker, name))
+            actual = inspect.signature(getattr(server, name))
+            wanted = [parameter.name for key, parameter in declared.parameters.items() if key != 'self']
+            self.assertEqual(wanted, list(actual.parameters), name)
+            for key, parameter in actual.parameters.items():
+                if parameter.annotation is not parameter.empty:
+                    self.assertEqual(str(declared.parameters[key]), str(parameter), name)
+            if actual.return_annotation is not actual.empty:
+                self.assertEqual(str(declared.return_annotation), str(actual.return_annotation), name)
+
+
+class RouteTableTests(unittest.TestCase):
+    """The route table adds the four owner routes under the endpoint names they had before."""
+
+    def test_each_route_has_its_method_and_endpoint(self):
+        rules = {(rule.rule, method): rule.endpoint for rule in server.app.url_map.iter_rules()
+                 if rule.rule.startswith('/schedules') for method in rule.methods - {'HEAD', 'OPTIONS'}}
+        self.assertEqual(rules, {
+            ('/schedules', 'GET'): 'schedules_list',
+            ('/schedules', 'POST'): 'schedules_create',
+            ('/schedules/<schedule_id>', 'PATCH'): 'schedules_edit',
+            ('/schedules/<schedule_id>/<action>', 'POST'): 'schedules_action',
+        })
+
+    def test_each_route_asks_for_the_token_outside_ingress(self):
+        """Without Ingress and without the worker API token, every route answers 401 and calls no handler."""
+        client = server.app.test_client()
+        with patch.object(server, 'is_ingress_request', return_value=False), \
+                patch.object(server, 'api_token', return_value='sample-token'), \
+                patch.object(schedule_api, 'state', side_effect=AssertionError('handler ran')):
+            for method, path in (('get', '/schedules'), ('post', '/schedules'), ('patch', '/schedules/abc'),
+                                 ('post', '/schedules/abc/approve')):
+                with self.subTest(method=method, path=path):
+                    self.assertEqual(getattr(client, method)(path, json={}).status_code, 401)

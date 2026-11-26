@@ -1,14 +1,13 @@
 """Let the paired worker read bounded Core logs, never other apps' logs."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 import hmac
 import json
 import os
-from collections.abc import Iterator
 from typing import Any
 
 from aiohttp import web
-
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.http.const import KEY_HASS_USER
 from homeassistant.config_entries import ConfigEntryState
@@ -47,12 +46,12 @@ class DiagnosticView(HomeAssistantView):
         tokens = [getattr(runtime, "worker_token", None) for runtime in loaded_runtime_data(self.hass)]
         worker_token = next((token for token in tokens if isinstance(token, str) and token), None)
         if worker_token is None:
-            raise web.HTTPServiceUnavailable()
+            raise web.HTTPServiceUnavailable
         supplied = data.get("worker_token", "")
         if not isinstance(supplied, str) or not request[KEY_HASS_USER].is_admin or not hmac.compare_digest(
             supplied.encode(), worker_token.encode()
         ):
-            raise web.HTTPForbidden()
+            raise web.HTTPForbidden
 
     async def post(self, request: web.Request) -> web.Response:
         """Return the last 100 Core log lines from Supervisor, cut off at 32768 bytes, to the paired worker.
@@ -63,10 +62,10 @@ class DiagnosticView(HomeAssistantView):
         self.check_caller(request, data)
         target = data.get("target") if isinstance(data, dict) else None
         if target != "core":
-            raise web.HTTPBadRequest()
+            raise web.HTTPBadRequest
         token = os.environ.get("SUPERVISOR_TOKEN")
         if not token:
-            raise web.HTTPServiceUnavailable()
+            raise web.HTTPServiceUnavailable
         async with async_get_clientsession(self.hass).get(
             "http://supervisor/core/logs", params={"lines": 100},
             headers={"Authorization": f"Bearer {token}"},
@@ -88,18 +87,18 @@ class DiagnosticView(HomeAssistantView):
         # The Supervisor proxy only forwards selected headers, so pairing travels
         # in the authenticated JSON body, never a URL/query string.
         if request.content_length is not None and request.content_length > 4096:
-            raise web.HTTPBadRequest()
+            raise web.HTTPBadRequest
         content = bytearray()
         async for chunk in request.content.iter_chunked(1024):
             content.extend(chunk)
             if len(content) > 4096:
-                raise web.HTTPBadRequest()
+                raise web.HTTPBadRequest
         try:
             data = json.loads(content)
         except (ValueError, UnicodeError) as exc:
-            raise web.HTTPBadRequest() from exc
+            raise web.HTTPBadRequest from exc
         if not isinstance(data, dict):
-            raise web.HTTPBadRequest()
+            raise web.HTTPBadRequest
         return data
 
 
