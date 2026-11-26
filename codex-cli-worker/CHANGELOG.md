@@ -18,6 +18,8 @@
 - **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
   the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
   selects the code instead, so you can copy it by hand.
+- The GitHub card's help text no longer mentions the **Check now** button that 0.5.1 removed. After you add repositories
+  on GitHub, it says to press **Accept this access** when it appears, and a failed read test points to the repository list.
 - **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
   that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
   next run starts a new one.

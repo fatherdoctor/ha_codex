@@ -305,7 +305,8 @@ class CheckTests(ServiceCase):
         self.assertIn("HTTP 404", result["text"])
         # Astro F5: a plain summary and a next step, with the HTTP number kept as the detail.
         self.assertTrue(result["text"].startswith(f"Read failed: GitHub did not return {REPO} (HTTP 404)."))
-        self.assertIn("Choose Check now", result["text"])
+        self.assertIn("Look at the repositories listed on the card", result["text"])
+        self.assertNotIn("Check now", result["text"])
 
 
 class TokenFallbackTests(ServiceCase):
