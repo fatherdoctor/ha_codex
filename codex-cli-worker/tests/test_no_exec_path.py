@@ -55,8 +55,8 @@ class LaunchTests(unittest.TestCase):
         server.tasks[task_id] = {"task_id": task_id, "status": "queued"}
         try:
             with tempfile.TemporaryDirectory() as temp_dir, \
-                 patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id), \
-                 patch.object(server, "save_task_index"), \
+                 patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id), \
+                 patch.object(server.store, "save_index"), \
                  patch.object(server, "read_options", return_value={**options, "task_timeout_seconds": 30}), \
                  patch.object(server, "task_options", return_value=options), \
                  patch.object(server, "background_task", return_value=background), \
@@ -98,8 +98,8 @@ class LaunchTests(unittest.TestCase):
         options = {"codex_sandbox": "danger-full-access"}
         try:
             with tempfile.TemporaryDirectory() as temp_dir, \
-                 patch.object(server, "get_task_dir", return_value=Path(temp_dir) / task_id), \
-                 patch.object(server, "save_task_index"), \
+                 patch.object(server.store, "task_dir", return_value=Path(temp_dir) / task_id), \
+                 patch.object(server.store, "save_index"), \
                  patch.object(server, "read_options", return_value=options), \
                  patch.object(server, "task_options", return_value=options), \
                  patch.object(server, "write_task_log"), \

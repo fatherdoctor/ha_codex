@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import sys
+from typing import Any
 
 import tool_threads
 
@@ -101,7 +102,7 @@ STATUS_TOOLS = [
 ]
 
 
-def fetch(name, arguments, thread_id):
+def fetch(name: str, arguments: Any, thread_id: str) -> dict[str, Any]:
     """Forward an allowlisted operation to the worker with the chat's thread id that Codex sent."""
     tool = next((tool for tool in TOOLS if tool["name"] == name), None)
     if tool is None or not isinstance(arguments, dict) or set(arguments) - set(tool["inputSchema"]["properties"]):
@@ -123,7 +124,7 @@ def fetch(name, arguments, thread_id):
     return json.loads(raw)
 
 
-def status_text_problem(value, limit):
+def status_text_problem(value: Any, limit: int) -> str:
     """Return why a text argument is not usable, or an empty string."""
     if not isinstance(value, str) or not value.strip():
         return "must be text that is not empty"
@@ -132,7 +133,7 @@ def status_text_problem(value, limit):
     return ""
 
 
-def record_status(name, arguments):
+def record_status(name: str, arguments: Any) -> str:
     """Check an ask_owner or report_failure call and return the text Codex gets back."""
     if not isinstance(arguments, dict):
         raise ValueError("The arguments must be an object.")
@@ -157,7 +158,7 @@ def record_status(name, arguments):
     return "The question is recorded. End your turn now, and write the question, with its choices, as your answer."
 
 
-def call_tool(name, arguments, thread_id=""):
+def call_tool(name: Any, arguments: Any, thread_id: str = "") -> dict[str, Any]:
     """Answer a status tool here, and forward every other tool to the worker."""
     if name in {tool["name"] for tool in STATUS_TOOLS}:
         try:
@@ -171,7 +172,7 @@ def call_tool(name, arguments, thread_id=""):
     return {"content": [{"type": "text", "text": json.dumps(result)}], "isError": result.get("status") == "unavailable"}
 
 
-def respond(request):
+def respond(request: dict[str, Any]) -> dict[str, Any]:
     """Expose initialization, discovery, the read-only recorder tools, exchange_info and the two status tools."""
     method = request.get("method")
     if method == "initialize":
@@ -197,7 +198,7 @@ def respond(request):
     raise ValueError("Method not found")
 
 
-def main():
+def main() -> int:
     """Serve bounded JSON-RPC lines, keeping all diagnostics out of stdout."""
     while raw := sys.stdin.buffer.readline(65537):
         if len(raw) > 65536:

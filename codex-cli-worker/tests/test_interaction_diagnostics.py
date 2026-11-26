@@ -11,6 +11,12 @@ import interaction_diagnostics as diag
 
 class DiagnosticsTests(unittest.TestCase):
 
+    def test_a_path_in_the_configuration_folder_keeps_its_category(self):
+        """Codex reports absolute paths under /homeassistant since 0.6 (CX-HA-PATH); the category must survive."""
+        from diagnostics_scrub import path_categories
+        self.assertEqual(path_categories(['/homeassistant/scripts/x.yaml']), [{'folder': 'scripts', 'extension': '.yaml'}])
+        self.assertEqual(path_categories(['/config/scripts/x.yaml', '/share/x.yaml']), [])
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -29,7 +35,7 @@ class DiagnosticsTests(unittest.TestCase):
             # Repeated synthetic entity IDs test stable pseudonyms within one export.
             'entities': ['light.sample', 'light.sample'],
             # The private filename must reduce to a folder and extension.
-            'paths': ['/config/scripts/private_canary.yaml'],
+            'paths': ['/homeassistant/scripts/private_canary.yaml'],
             # The error message stands for private exception prose and must be discarded.
             'events': [{'kind': 'tool', 'name': 'commandExecution', 'result': 'done', 'duration_seconds': 1}, {'kind': 'approval', 'decision': 'denied'}, {'kind': 'gate', 'rule': 'credential'}, {'kind': 'error', 'type': 'ValueError', 'message': 'PRIVATE_CANARY'}, {'kind': 'ha_read', 'operation': 'state', 'domain': 'light'}],
         }
@@ -197,7 +203,7 @@ class RecorderTests(unittest.TestCase):
             # Raw entity identifiers must be replaced with keyed references.
             entities=['light.private_entity_canary', 'light.private_entity_canary'],
             # Only the folder category and suffix may survive this filename.
-            paths=['/config/scripts/private_file_canary.yaml'],
+            paths=['/homeassistant/scripts/private_file_canary.yaml'],
         )
         # The exception message must be replaced with the fixed ValueError text.
         self.recorder.finish('PRIVATE_TASK_CANARY', 'failed', ValueError('PRIVATE_ERROR_CANARY'))

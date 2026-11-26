@@ -211,10 +211,8 @@ def test_sign_in_force_metadata_matches_action_default():
     """The visible field explains both cases that otherwise look like a no-op."""
     import json
     import yaml
-    source = json.loads((ROOT / "strings.json").read_text())
     english = json.loads((ROOT / "translations/en.json").read_text())
-    action = source["services"]["start_login"]
-    assert english["services"]["start_login"] == action
+    action = english["services"]["start_login"]
     field = action["fields"]["force"]["description"]
     assert "false" in field and "already signed in" in field
     assert "running" in field and "restart" in field

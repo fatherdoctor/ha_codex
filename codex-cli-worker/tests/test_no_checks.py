@@ -1,7 +1,7 @@
 """The add-on does not judge a turn after it ends: no changed-file verdicts, no screenshots, no review notes.
 
 Codex checks its own work, as its AGENTS.md says. Other writers (an automation, another app, a person in the
-file editor) can change files under /config while a turn runs; the answer must not blame those changes on the turn.
+file editor) can change files under /homeassistant while a turn runs; the answer must not blame those changes on the turn.
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
+from chat_scripts import chat_source
 import test_backups
 from test_server import server
 
@@ -24,7 +25,7 @@ class NoChecksAfterTheTurnTests(unittest.TestCase):
     steps = test_backups.RunTests.steps
 
     def codex_that_edits_nothing(self, *, outside_writes):
-        """A fake Codex that only answers, while another writer changes files under /config during the turn."""
+        """A fake Codex that only answers, while another writer changes files under /homeassistant during the turn."""
         def write_outside():
             for rel, content in outside_writes.items():
                 path = self.config / rel
@@ -83,7 +84,7 @@ class NoChecksAfterTheTurnTests(unittest.TestCase):
         self.assertFalse(hasattr(server, "review_backups"))
         source = (WORKER / "server.py").read_text(encoding="utf-8")
         self.assertNotIn("Verification needs review", source)
-        chat = (WORKER / "web" / "assets" / "chat.js").read_text(encoding="utf-8")
+        chat = chat_source()
         self.assertNotIn("No previous version saved", chat)
         self.assertNotIn("renderBackups", chat)
 

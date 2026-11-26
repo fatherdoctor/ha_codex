@@ -11,7 +11,7 @@ from app_folders import changes, snapshot  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def no_writes_under_the_real_app_folders(request):
-    """Fail a test that creates, changes or deletes anything under /data, /config or /addon_config.
+    """Fail a test that creates, changes or deletes anything under /data, /homeassistant or /addon_config.
 
     A test that needs those folders uses app_folders.isolated_app_folders() with a temporary folder.
     """

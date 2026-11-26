@@ -670,7 +670,7 @@ async function effortSaved(page, label) {
     assert.equal(await page.locator("#activity .step").count(), 3);
     assert.equal(
       await page.locator("#activity .step-command .step-text").textContent(),
-      "cat /config/automations.yaml",
+      "cat /homeassistant/automations.yaml",
     );
     await page.getByRole("button", { name: "Show output" }).click();
     await page.locator("#activity .step-output").waitFor();
@@ -703,20 +703,22 @@ async function effortSaved(page, label) {
       await page.locator("#picker-model").textContent(),
     );
     assert.equal(await page.locator("#effort-model svg.effort-model-chevron").count(), 1);
-    // No lightning (fast mode) toggle anywhere on the page, in the composer or the panel, until it
-    // works: the Codex CLI has no setting for it (returns in 0.6, CX-04-FB-MODEL).
-    assert.equal(
-      await page.evaluate(() =>
-        [...document.querySelectorAll(".effort-bolt, [class*='bolt'], [id*='bolt'], [id*='fast'], .mdi-lightning-bolt, .mdi-flash, path")]
-          .filter((node) =>
-            node.tagName.toLowerCase() !== "path" ||
-            /^m13 3-8 10h6l-1 8 9-11h-6l1-7z$/i.test(node.getAttribute("d") || ""),
-          )
-          .filter((node) => node.getClientRects().length > 0 || node.closest("#effort-popover")).length,
-      ),
-      0,
+    // CX-04-FB-MODEL: the lightning toggle in the panel turns Fast mode on for this chat and keeps the
+    // panel open; the chip shows a small bolt once the panel closes. Fast stays on to the run checked below.
+    assert.equal(await page.locator("#effort-fast").getAttribute("aria-pressed"), "false");
+    assert.equal(await page.locator("#effort-fast").getAttribute("title"), "Fast mode: off");
+    await page.locator("#effort-fast").click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#effort-fast").getAttribute("aria-pressed") === "true" &&
+        !document.querySelector("#picker-button").disabled,
     );
-    assert.equal(await page.getByRole("button", { name: /fast|lightning/i }).count(), 0);
+    assert.equal(await page.locator("#effort-popover").isVisible(), true);
+    assert.match(await page.locator("#effort-fast").getAttribute("title"), /^Fast mode: on/);
+    assert.equal(await page.locator("#picker-fast").isVisible(), false);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#picker-fast").isVisible(), true);
+    await openPicker(page);
     assert.equal(
       await page.locator("#effort-dots span").count(),
       Number(await page.locator("#effort-slider").getAttribute("max")) + 1,
@@ -1004,7 +1006,9 @@ async function effortSaved(page, label) {
     assert.deepEqual(saved.chat_settings, {
       model: "gpt-6-astra",
       reasoning_effort: "xhigh",
+      fast: true,
     });
+    // The run took the chat's Fast choice with it.
     assert.deepEqual(
       saved.turns.at(-1).execution_settings,
       saved.chat_settings,
@@ -1019,7 +1023,7 @@ async function effortSaved(page, label) {
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: "gpt-6.1-terra", reasoning_effort: "ultra" },
+      { model: "gpt-6.1-terra", reasoning_effort: "ultra", fast: true },
     );
     // Choosing the model the add-on runs anyway clears the chat's own selection.
     await chooseModel(page, "GPT-6.2 Sol");
@@ -1028,7 +1032,7 @@ async function effortSaved(page, label) {
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: null, reasoning_effort: "ultra" },
+      { model: null, reasoning_effort: "ultra", fast: true },
     );
     await chooseModel(page, "GPT-6 Luna");
     assert.equal(await page.locator("#effort-label").textContent(), "Medium");
@@ -1044,13 +1048,14 @@ async function effortSaved(page, label) {
       })
       .click();
     await effortSaved(page, "Medium");
-    // Reset goes back to the default model too, not only its level.
+    // Reset goes back to the default model too, not only its level. It leaves the Fast choice alone, and the chat
+    // turned Fast on earlier in this flow, so the saved settings keep fast: true.
     assert.deepEqual(
       await page.evaluate(
         async () =>
           (await (await fetch("tasks/preview-00")).json()).task.chat_settings,
       ),
-      { model: null, reasoning_effort: null },
+      { model: null, reasoning_effort: null, fast: true },
     );
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#effort-popover").isHidden(), true);
@@ -1156,7 +1161,7 @@ async function effortSaved(page, label) {
       "<i>code</i> **stays** as typed",
       "```",
       "",
-      "[script](javascript:window.untrustedRan=true) [file](/config/automations.yaml)",
+      "[script](javascript:window.untrustedRan=true) [file](/homeassistant/automations.yaml)",
       "![remote image](https://example.invalid/pixel.png)",
       "<b>raw</b> <script>window.untrustedRan=true</script>",
       "[site](https://www.home-assistant.io/)",
@@ -1475,8 +1480,16 @@ async function effortSaved(page, label) {
     await page.locator("#queued-edit").fill("Discarded edit");
     await page.locator("#queued-edit").press("Escape");
     assert.equal(await queuedBubble.textContent(), typo);
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
-    await page.locator("#queued-edit").fill(corrected);
+    // Select the text before the first frame, as fill can do when the editor opens.
+    await page
+      .getByRole("button", { name: "Edit", exact: true })
+      .evaluate(async (button) => {
+        button.click();
+        document.querySelector("#queued-edit").select();
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+    await page.keyboard.insertText(corrected);
+    assert.equal(await page.locator("#queued-edit").inputValue(), corrected);
     await page.locator("#queued-edit").press("Enter");
     await page.waitForFunction(
       (text) =>
@@ -2026,9 +2039,10 @@ async function effortSaved(page, label) {
     await require("./browser_answer_bleed.cjs")(browser, output, errors);
     await require("./browser_thinking.cjs")(browser, output, errors);
     await require("./browser_reply_layout.cjs")(browser, output, errors);
+    await require("./browser_poll.cjs")(browser, output, errors);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), resize, mobile and dark mode. Screenshots: " +
+      "PASS: queued messages (wait behind a working chat, edit, remove, start in order), choices under a question (pick one, draft kept, late answer refused), attached images (pick, reject, remove, send, render, batch stays with its chat, send waits for decoding), chat actions (pin, rename, delete, long press), generated image attachments, Markdown formatting (sent messages, answers, untrusted text, slow or long text, narrow screens), saved model/reasoning choices, model compatibility, the model a chat runs on by name, quota bars, the line about the Codex integration, keyboard/reset controls, history, pagination, continuation, new chats, drafts, reopening the last chat, safe text, settings, text size (three sizes, kept per device, phone and iPad), slash-prefixed messages (Enter and Send), file links in answers (card, download, refused paths), narration kept out of the answer (inside the closed list, aligned with it at four widths), the live Thinking line (newest summary, replaced as it streams, under the steps, gone at the end), reply layout (five transcript-shaped examples at four widths: narration count, edges, gaps), the repeating checks and busy buttons (poll, busyAction), resize, mobile and dark mode. Screenshots: " +
         output,
     );
   } finally {

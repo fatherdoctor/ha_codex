@@ -97,10 +97,10 @@ RUN chmod 0555 /usr/share/ha_codex/hass_mcp_launch.py && chown root:root /usr/sh
 WORKDIR /data
 
 COPY run.sh /
-COPY server.py account_access.py safety_block.py codex_host.py starter_agents.md /
+COPY server.py account_access.py safety_block.py codex_host.py starter_agents.md builtin_instructions.md /
 COPY interaction_diagnostics.py diagnostics_scrub.py /
 # Codex's managed requirements (the sandbox modes and approval policies a client may ask for) and managed
-# config (the tool keys kept out of commands), read-only, outside /config and every sandbox's writable roots.
+# config (the tool keys kept out of commands), read-only, outside /homeassistant and every sandbox's writable roots.
 COPY gate/requirements.toml gate/managed_config.toml /etc/codex/
 # The shipped requirements, from which full_access.py writes /etc/codex/requirements.toml at start.
 COPY gate/requirements.toml /usr/share/ha_codex/requirements.toml
@@ -115,13 +115,13 @@ COPY push_guard.py /usr/share/ha_codex/push_guard.py
 RUN chmod 0555 /usr/local/bin/codex-github-askpass && chmod 0444 /usr/share/ha_codex/push_guard.py \
     && chown root:root /usr/local/bin/codex-github-askpass /usr/share/ha_codex/push_guard.py
 
-COPY full_access.py core_address.py hass_mcp.py relay_reads.py relay_reads_mcp.py scheduling.py retention.py schedule_api.py scheduling_mcp.py approvals.py policy.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py ha_data.py ha_data_mcp.py ha_call.py ha_call_mcp.py name_match.py tool_threads.py update_status.py /
+COPY app_paths.py old_path_scan.py full_access.py core_address.py hass_mcp.py relay_reads.py relay_reads_mcp.py scheduling.py retention.py schedule_api.py scheduling_mcp.py approvals.py policy.py remote_control.py relay_diagnostics.py verification.py verification_mcp.py ha_data.py ha_data_mcp.py ha_call.py ha_call_mcp.py name_match.py tool_threads.py update_status.py task_store.py /
 COPY web /web
-# The Codex integration of the same release, which integration_sync.py installs in /config at start.
+# The Codex integration of the same release, which integration_sync.py installs in /homeassistant at start.
 # The build copies custom_components/codex_cli into integration/ first (see integration/README.md).
 COPY integration /usr/share/ha_codex/integration
 COPY integration_sync.py /
-# The protected permission policy: read-only, outside /config and every sandbox's writable roots.
+# The protected permission policy: read-only, outside /homeassistant and every sandbox's writable roots.
 COPY policy/policy.json /usr/share/ha_codex/policy.json
 RUN chmod 0444 /usr/share/ha_codex/policy.json
 

@@ -18,12 +18,12 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from chat_scripts import chat_source
 from test_server import server
 import scheduling
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs" / "app-reference.md"
-CHAT_JS = ROOT / "codex-cli-worker" / "web" / "assets" / "chat.js"
 API_PATH = ROOT / "custom_components" / "codex_cli" / "api.py"
 
 PAGE, APP, SERVICE = "Chat page", "ChatGPT app", "codex_cli.start_task"
@@ -157,10 +157,11 @@ def task_started_by_service(prompt: str) -> dict:
     started = MagicMock()
     with tempfile.TemporaryDirectory() as temp_dir, ExitStack() as stack:
         root = Path(temp_dir)
-        stack.enter_context(patch.object(server, "get_task_dir", side_effect=lambda task_id: root / task_id))
+        stack.enter_context(patch.object(server.store, "task_dir", side_effect=lambda task_id: root / task_id))
         stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         stack.enter_context(patch.object(server, "start_background_task", started))
-        for name in ("save_task_index", "fire_ha_event", "notify", "refresh_usage_status_async"):
+        stack.enter_context(patch.object(server.store, "save_index"))
+        for name in ("fire_ha_event", "notify", "refresh_usage_status_async"):
             stack.enter_context(patch.object(server, name))
         response = server.app.test_client().post(
             "/tasks", headers={"Authorization": "Bearer test-token"}, json={"prompt": prompt})
@@ -220,7 +221,7 @@ class WaysInTests(unittest.TestCase):
         """
         task = task_started_by_service("Turn on a light")
         self.assertNotIn(task.get("task_source"), {"schedule", "lead"})
-        with patch.object(server, "tasks", {task["task_id"]: task}):
+        with patch.dict(server.tasks, {task["task_id"]: task}, clear=True):
             self.assertFalse(server.background_task(task["task_id"]))
         self.assertEqual(tools_of(page_args()), self.page)
 
@@ -235,7 +236,7 @@ class WaysInTests(unittest.TestCase):
         session.request.return_value = context
         asyncio.run(api.CodexCliApiClient(session, "http://worker", "token").start_task("Turn on a light"))
         self.assertEqual(session.request.call_args.args, ("POST", "http://worker/tasks"))
-        self.assertRegex(CHAT_JS.read_text(encoding="utf-8"), r':\s*"tasks"')
+        self.assertRegex(chat_source(), r':\s*"tasks"')
         for request, row in WAYS_IN.items():
             with self.subTest(request=request):
                 self.assertEqual(row[SERVICE], row[PAGE])

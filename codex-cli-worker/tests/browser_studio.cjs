@@ -134,8 +134,17 @@ fs.mkdirSync(output,{recursive:true});
    await page.locator('#workspace-section .settings-toggle').click();
    await page.locator('#workspace-open').click();
    await page.waitForFunction(()=>!document.getElementById('agents').disabled);
+   // The built-in layer: the text the worker sends, shown read-only above the editor, never in the saved text.
+   const builtin=(await (await page.request.get(base+'agents')).json()).builtin;
+   assert.ok(builtin.includes("The owner's AGENTS.md takes priority"));
+   assert.equal(await page.locator('#builtin-text').textContent(),builtin);
+   assert.equal(await page.locator('#builtin-text').evaluate(e=>getComputedStyle(e).fontStyle),'italic');
+   const above=await page.evaluate(()=>document.getElementById('builtin-text').getBoundingClientRect().bottom<=document.getElementById('agents').getBoundingClientRect().top);
+   assert.ok(above);
+   const saved=page.waitForRequest(r=>r.method()==='POST'&&r.url().endsWith('/agents'));
    await page.locator('#agents').fill('Synthetic workspace rules.');
    await page.locator('#save-agents').click();
+   assert.deepEqual((await saved).postDataJSON(),{content:'Synthetic workspace rules.'});
    await page.locator('#workspace-result').filter({hasText:'saved'}).waitFor();
    await page.locator('[data-close="workspace-dialog"]').click();
    // Five real state shapes, all from a synthetic intercepted status response.

@@ -49,7 +49,7 @@ shell network access, service calls, reloads or arbitrary URLs.
 ```
 
 `find` looks an entity up by the words a person uses for it, so a device command needs no search of the files
-under `/config`. An entity matches when its friendly name or entity id holds every word; `domain` is optional.
+under `/homeassistant`. An entity matches when its friendly name or entity id holds every word; `domain` is optional.
 The answer holds at most 10 matches, each with its entity id, friendly name and state, the closest name first,
 and says how many matched in all. Entities with a credential-like name and password-mode text entities are left
 out. It is a read: it changes nothing and counts toward the message's check limit like any other check.

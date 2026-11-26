@@ -23,7 +23,7 @@ class ChatFilesTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        self.stack.enter_context(patch.object(server, "tasks", {TASK_ID: {"task_id": TASK_ID, "status": "completed"}}))
+        self.stack.enter_context(patch.dict(server.tasks, {TASK_ID: {"task_id": TASK_ID, "status": "completed"}}, clear=True))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
         self.stack.enter_context(patch.object(server, "write_task_log"))
@@ -140,7 +140,8 @@ class ChatFilesTests(unittest.TestCase):
         with patch.object(server, "task_mode_settings", return_value={
                 "sandbox": "workspace-write", "approval_policy": "on-request", "approvals_reviewer": "user"}):
             session = server.create_approval_session(TASK_ID, proc, "Make a table", final, None, {}, options)
-        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"], ["/config", "/share", str(folder)])
+        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"],
+                         ["/homeassistant", "/share", "/media", "/media/.agents", "/addon_config", str(folder)])
         with patch.object(server, "task_mode_settings", return_value={
                 "sandbox": "read-only", "approval_policy": "on-request", "approvals_reviewer": "user"}):
             reader = server.create_approval_session(TASK_ID, proc, "Read", final, None, {}, options)

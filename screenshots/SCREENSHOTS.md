@@ -10,6 +10,9 @@ Each screenshot exists in four versions: `light` and `dark` color scheme, `deskt
 | Name | What it shows |
 |---|---|
 | `chat` | The chat page with one saved conversation open: a question about an automation and the answer that explains the change. |
+| `info-chats` | The **New chat** button and the list of saved conversations, as the app's **Info** tab shows them. |
+| `info-usage` | The foot of the sidebar: the Codex and GitHub status rows, the 5-hour and weekly quota bars, and **Settings**. |
+| `info-reply` | The end of an answer and the message box below it, with the permission mode and the model. |
 | `confirm` | A command that waits for one confirmation: what changes, where, the effect, the working folder, the command, and **Allow once** and **Deny**. The phone versions start lower in the card, so that both buttons are in view. |
 | `schedule-proposal` | **Settings** > **Scheduled runs**: a schedule that an agent proposed, which stays off until you approve it, and an approved schedule. |
 | `sign-in` | **Settings** > **ChatGPT account** while a sign-in waits for its code. The code and the QR code are blurred. |
@@ -22,6 +25,15 @@ Each row shows one screen: light and dark on a desktop, then light and dark on a
 
 <p><img src="chat-light-desktop.png" alt="Chat, light, desktop" width="360"> <img src="chat-dark-desktop.png" alt="Chat, dark, desktop" width="360"></p>
 <p><img src="chat-light-phone.png" alt="Chat, light, phone" width="180"> <img src="chat-dark-phone.png" alt="Chat, dark, phone" width="180"></p>
+
+### Info tab
+
+The app's **Info** tab (`codex-cli-worker/README.md`) shows the light desktop version of these three.
+
+<p><img src="info-chats-light-desktop.png" alt="Chat list, light, desktop" width="180"> <img src="info-chats-dark-desktop.png" alt="Chat list, dark, desktop" width="180"> <img src="info-chats-light-phone.png" alt="Chat list, light, phone" width="180"> <img src="info-chats-dark-phone.png" alt="Chat list, dark, phone" width="180"></p>
+<p><img src="info-usage-light-desktop.png" alt="Usage area, light, desktop" width="180"> <img src="info-usage-dark-desktop.png" alt="Usage area, dark, desktop" width="180"> <img src="info-usage-light-phone.png" alt="Usage area, light, phone" width="180"> <img src="info-usage-dark-phone.png" alt="Usage area, dark, phone" width="180"></p>
+<p><img src="info-reply-light-desktop.png" alt="Message box below a reply, light, desktop" width="360"> <img src="info-reply-dark-desktop.png" alt="Message box below a reply, dark, desktop" width="360"></p>
+<p><img src="info-reply-light-phone.png" alt="Message box below a reply, light, phone" width="180"> <img src="info-reply-dark-phone.png" alt="Message box below a reply, dark, phone" width="180"></p>
 
 ### Confirmation
 
@@ -37,6 +49,7 @@ Each row shows one screen: light and dark on a desktop, then light and dark on a
 
 <p><img src="sign-in-light-desktop.png" alt="Sign-in, light, desktop" width="360"> <img src="sign-in-dark-desktop.png" alt="Sign-in, dark, desktop" width="360"></p>
 <p><img src="sign-in-light-phone.png" alt="Sign-in, light, phone" width="180"> <img src="sign-in-dark-phone.png" alt="Sign-in, dark, phone" width="180"></p>
+
 ## Not taken yet
 
 These screens belong to Home Assistant, not to the add-on page, so the test fixture cannot show them. They are taken
@@ -54,7 +67,8 @@ uploads the new files as an artifact named `screenshots`. Compare them with the 
 changed.
 
 The `confirm` screenshots change on every run: the chat header and the conversation list show the time at which the
-script sent the request. Commit them only when something else in the picture changed. All other screenshots use a
+script sent the request. The `info-reply` screenshots change on every run too: the line under the answer shows the
+time at which the fixture ran it. Commit them only when something else in the picture changed. All other screenshots use a
 fixed sample date and are the same on every run unless the page changed.
 
 To take them on your own computer, install the test dependencies (Python: `flask`, `pyyaml`, `requests`, `qrcode`,
@@ -68,6 +82,10 @@ CODEX_FIXTURE_SIGN_IN=pending python codex-cli-worker/tests/web_fixture.py &
 CODEX_FIXTURE_SIGN_IN=pending node codex-cli-worker/tests/readme_screenshots.cjs
 kill %1
 ```
+
+Before its first shot the script saves sample workspace rules in the fixture, through the same request as the
+**Settings** editor, so no screenshot shows the "No workspace instructions yet" warning of a new install. In the
+`info` shots it also dismisses the "Schedule proposal waiting" warning that the sample proposal raises.
 
 The script writes to `screenshots/`. Set `SCREENSHOT_DIR` to write somewhere else.
 

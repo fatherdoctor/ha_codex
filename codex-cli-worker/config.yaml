@@ -18,11 +18,13 @@ arch:
 map:
   - type: homeassistant_config
     read_only: false
-    path: /config
+    path: /homeassistant
   - type: addon_config
     read_only: false
     path: /addon_config
   - type: share
+    read_only: false
+  - type: media
     read_only: false
 homeassistant_api: true
 hassio_api: true

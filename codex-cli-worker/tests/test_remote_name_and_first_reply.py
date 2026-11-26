@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
+from chat_scripts import chat_source
 from test_server import server
 from remote_unpaused import setUpModule, tearDownModule  # noqa: F401  (Remote Control is paused)
 
@@ -150,7 +151,7 @@ class FirstReplyPrompt(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             agents = Path(folder) / "AGENTS.md"
             with patch.object(server, "AGENTS_PATH", agents):
-                self.assertNotIn("AGENTS.md", server.remote_control_instructions({}))
+                self.assertNotIn("Owner workspace instructions", server.remote_control_instructions({}))
                 agents.write_text("Synthetic owner rules")
                 self.assertIn(f"Owner workspace instructions: {agents}. ",
                               server.remote_control_instructions({}))
@@ -161,7 +162,7 @@ class PageControls(unittest.TestCase):
 
     def test_name_field_posts_to_the_rename_action_and_has_a_back_control(self):
         html = (WEB / "index.html").read_text()
-        chat = (WEB / "assets" / "chat.js").read_text()
+        chat = chat_source()
         studio = (WEB / "assets" / "studio.js").read_text()
         self.assertIn('id="remote-control-name-form"', html)
         self.assertIn('id="remote-control-name" maxlength="63"', html)

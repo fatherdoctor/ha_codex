@@ -4,9 +4,13 @@ Ask OpenAI's Codex, in a chat inside Home Assistant, to explain your setup or ch
 your configuration folder, edits it, checks the YAML it changed and tells you what it did. You stay in control: in
 the **Ask for approval** and **Read only** modes, the chat asks you first when a step needs more access.
 
-![The chat page with a saved conversation: a question about an automation and Codex's answer](https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/screenshots/chat-light-desktop.png)
+<p><img src="https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/screenshots/info-chats-light-desktop.png" alt="The New chat button and the list of saved conversations" width="200"> <img src="https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/screenshots/info-usage-light-desktop.png" alt="The status rows, the quota bars and Settings at the foot of the sidebar" width="200"></p>
 
-*The chat page. The sidebar lists your saved conversations; the open one shows a question and the answer.*
+*The sidebar: your saved conversations, and below them the Codex and GitHub status, the quota left and **Settings**.*
+
+![The end of an answer and the message box below it](https://raw.githubusercontent.com/fatherdoctor/ha_codex/main/screenshots/info-reply-light-desktop.png)
+
+*The end of an answer and the message box, where you ask the next question.*
 
 ## Quick Start
 
@@ -44,12 +48,13 @@ Codex access; the [Documentation](DOCS.md) tab walks through the sign-in, one cl
 
 You can connect a GitHub repository to the app. Codex can then fetch, pull, push and clone it for you, for example to
 keep your configuration in version control. You connect it yourself, with a button in the app's **Settings**, and
-you choose which repositories Codex may reach. Codex never sees your GitHub token. The steps are in the
-[Documentation](DOCS.md) tab under **Connect GitHub**.
+you choose which repositories Codex may reach. In every permission mode except Full access, Codex cannot read your
+GitHub sign-in: it asks the app to run git for it. The steps are in the [Documentation](DOCS.md) tab under
+**Connect GitHub**.
 
 ## Setup
 
-Put rules for your house in **Settings** > **Workspace instructions** (the app's `AGENTS.md`). Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
+Put rules for your house in **Settings** > **Workspace instructions** (the app's `AGENTS.md`). Codex uses its defaults and your workspace instructions; the app bundles no house rules. It also sends its built-in instructions (folders, tools, logs, secrets and GitHub; shown above the editor, updated with the app), and your workspace instructions take priority over them. A new install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 The other options are on the app's **Configuration** tab. More: [Documentation](DOCS.md).
 
 ## Using ChatGPT for Home Assistant

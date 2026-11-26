@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from homeassistant.core import Context
+from homeassistant.core import Context, SupportsResponse
 from homeassistant.exceptions import Unauthorized
 
 ROOT = Path(__file__).resolve().parents[3] / "custom_components" / "codex_cli"
@@ -64,3 +64,13 @@ async def test_admin_and_automations_are_served(hass, hass_admin_user, runtime):
     for service, data in CALLS:
         for context in (Context(user_id=hass_admin_user.id), Context()):
             assert await _call(hass, service, data, context) == {"ok": True}
+
+
+async def test_every_action_is_in_the_table_and_in_this_check(hass):
+    """The table of actions is what gets registered, each can answer, and CALLS above covers each one."""
+    integration._async_register_services(hass)
+    names = [name for name, _handler, _schema in integration.SERVICES]
+    assert sorted(names) == sorted(service for service, _data in CALLS)
+    assert sorted(hass.services.async_services_for_domain("codex_cli")) == sorted(names)
+    for name in names:
+        assert hass.services.supports_response("codex_cli", name) is SupportsResponse.OPTIONAL

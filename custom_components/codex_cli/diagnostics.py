@@ -8,8 +8,8 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_API_TOKEN
 from .api import CodexCliApiError
+from .const import CONF_API_TOKEN
 from .diagnostics_scrub import sanitize_export
 
 TO_REDACT = {

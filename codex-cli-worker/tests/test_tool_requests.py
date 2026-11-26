@@ -175,7 +175,10 @@ class TwoChats(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
-        for key, value in {"DATA_ROOT": self.root, "TASK_STATE_FILE": self.root / "index.json", "tasks": {}}.items():
+        patcher = patch.dict(server.tasks, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key, value in {"DATA_ROOT": self.root, "TASK_STATE_FILE": self.root / "index.json"}.items():
             patcher = patch.object(server, key, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -306,7 +309,8 @@ class TheChatHoldsNoKey(unittest.TestCase):
 
     def test_run_task_puts_no_key_in_the_environment(self):
         source = Path(server.__file__).read_text(encoding="utf-8")
-        body = source[source.index("def run_task("):source.index("def _run_background_task(")]
+        # The exchange's stages (preflight, launch, run_task) sit between these two lines of server.py.
+        body = source[source.index("class Cancelled("):source.index("def _run_background_task(")]
         self.assertNotIn("_CAPABILITY", body)
         self.assertIn("env=codex_env(),", body)
 

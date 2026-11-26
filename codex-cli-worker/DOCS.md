@@ -22,12 +22,15 @@ example to keep your configuration in version control. You do every step with a 
 about GitHub into the chat.
 
 1. On GitHub, install the **Codex for Home Assistant** GitHub App on the repositories you choose. GitHub's own page
-   does this, and you can change the set there later. The App asks for Contents read and write, and nothing else.
+   does this, and you can change the set there later. The App asks for Contents read and write, and GitHub adds
+   Metadata read.
 2. In the chat, choose **Settings** > **Accounts and connections** > **GitHub**, then **Connect GitHub**. The card
-   shows a code in large letters and a link to `github.com/login/device`.
-3. Open the link, type the code and approve the App. The card checks every few seconds and shows your account and
+   shows a code in large letters, a link to `github.com/login/device` and a QR code of that page.
+3. Open the link, or scan the QR code with a phone, type the code and approve the App. The card checks every few seconds and shows your account and
    the repositories it reaches as soon as GitHub confirms. The code works for as long as GitHub says (15 minutes if
    GitHub gives no time). After that, choose **Connect GitHub** again for a new one.
+4. Codex reaches only the repositories that the App is installed on. To add one, choose **Add repositories** under
+   the list, pick the repository on GitHub's page, then choose **Check now** and **Accept this access**.
 
 If your organization does not allow the App, choose **Use a token instead**. On github.com, make a fine-grained
 token (**Settings** > **Developer settings** > **Fine-grained tokens**) for **one** repository, with **Contents:
@@ -36,15 +39,16 @@ Read and write** and an expiry of 90 days or less. Paste the token and the `owne
 
 What to know:
 
-- The app keeps the sign-in in its own private storage. Codex never holds your token: it asks the app to run git for
-  it.
+- The app keeps the sign-in in its own private storage. In every permission mode except Full access, Codex cannot
+  read the sign-in: it asks the app to run git for it. Full access runs Codex with no sandbox, so a command there
+  can read the app's private storage, the sign-in included.
 - **Clone** in the card copies a connected repository to `/share/<repository>`; you can type another folder name.
-  **Link** points a git folder you already have under `/share` or `/config` at a connected repository. You can also
-  ask Codex in the chat.
+  **Link** points a git folder you
+  already have under `/share` or `/homeassistant` at a connected repository. You can also ask Codex in the chat.
 - GitHub refuses a push that changes `.github/workflows/` with this access. Change workflow files on GitHub or on
   another computer.
-- **Disconnect** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
-- A restore from a Home Assistant backup does not bring the sign-in back. Connect again.
+- **Sign out** only makes this app forget the sign-in. To revoke it, use the link the card shows on GitHub.
+- A restore from a Home Assistant backup does not bring the sign-in back. Sign in again.
 
 If the card shows a warning, it says what happened and which button to press. More:
 [GitHub sign-in](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#github-sign-in).
@@ -69,15 +73,23 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 
 ## Your files
 
-- Your Home Assistant configuration is at `/config`, and `/share` is shared with other apps.
+- Inside the app your Home Assistant configuration is at `/homeassistant`, as in the Claude add-on (before 0.6 it was
+  `/config`; Home Assistant itself still calls it `/config`), and `/share` is shared with other apps.
+- Codex starts each chat in its working folder, `/media/.agents/codex`, for its notes and drafts. It may write in
+  `/homeassistant`, `/share`, `/media` and `/addon_config` (the app's own folder) without a request. The automatic
+  backup leaves `/media` out unless you include it.
 - A file that Codex makes for you goes in the chat's files folder. When Codex links to it, the chat shows a card you
   can download.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
+- The app also sends built-in instructions with every chat: folders, tools, logs, secrets and GitHub. Settings shows
+  them read-only above the editor. An update of the app updates them. Your `AGENTS.md` takes priority over them.
 - Chats and the files you attach to a message (images, and documents such as PDF, text, YAML or CSV) stay in the
-  app's private storage, not in `/config`. Attachments are removed after 7 days or with the chat.
+  app's private storage, not in
+  `/homeassistant`. Attachments are removed after 7 days or with the chat.
 - Keep your own Home Assistant backups. The app's saved copies of changed files can be missing, and `secrets.yaml`
-  and `.storage` are never copied.
+  and `.storage` are never copied. Codex can read and change both, like the rest of `/homeassistant`; the built-in
+  instructions tell it to keep secrets out of chat, other files and commits.
 
 More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#backups).
 
@@ -88,19 +100,21 @@ A scheduled run sends a chat's message again on a timetable, such as every morni
 next message in that chat, so Codex remembers everything said before. If the chat was deleted or archived, or Codex
 cannot resume it, the run starts a new chat.
 
-- Codex can **propose** a schedule, but a proposal stays off until an administrator approves it under **Settings** >
-  **Scheduled runs**.
+- Codex can **propose** a schedule. A repeating proposal stays off until an administrator approves it under
+  **Settings** > **Scheduled runs**. A one-time wakeup that Codex proposes is on at once: it runs one time, in the
+  same chat. Pause or delete it in the same place.
 - A scheduled run uses its schedule's permissions, **Ask for approval** or **Read only**, never the chat's. So it still
   asks before a step that needs more access, also in a chat set to Full access or Approve for me. Open its chat to
-  answer with **Allow once** or **Deny**. The run waits for your answer only until its **Time limit for a task** (one
-  hour by default) ends. Then the run stops, and the step it asked about does not run.
+  answer with **Allow once** or
+  **Deny**. The run waits for your answer only until its **Time limit for a task** (one hour by default) ends. Then
+  the run stops, and the step it asked about does not run.
 - Times follow your Home Assistant time zone. A run waits while another chat is working.
 
 More: [Scheduled runs](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#scheduled-runs).
 
 ## Backups and old chats
 
-- Before Codex changes, moves or deletes a file under `/config`, it copies the file. These copies are a safety net,
+- Before Codex changes, moves or deletes a file under `/homeassistant`, it copies the file. These copies are a safety net,
   not a check, and a copy can be missing. Keep your own Home Assistant backups.
 - `secrets.yaml` and everything under `.storage` are never copied. To undo a change to one of them, restore a Home
   Assistant backup.
@@ -132,6 +146,23 @@ Assistant user it signed in as, and the **Enable built-in browser** and **Browse
 change a dashboard, Codex now reads its configuration back. The integration removes the old user on its first
 start. Restart Home Assistant after the update.
 More: [Upgrading from an earlier version](https://github.com/fatherdoctor/ha_codex/blob/main/codex-cli-worker/VERIFICATION.md#upgrading-from-an-earlier-version).
+
+## What the sandbox still keeps back
+
+In Ask for approval and Approve for me, the sandbox keeps only these limits. Read only keeps them too, and also makes every file
+read-only. **Allow once** on a card gets past each of them for that one action.
+
+- **The app's own private files are hidden.** These are `/run/s6` and, in `/data`, the app's settings, its API token,
+  the remote control and GitHub sign-ins and the schedule database. The rest of `/data` is read-only, except the
+  chat's backup and files folders. Why: these tokens can answer the app's own permission cards or call Home
+  Assistant directly, so a task that reads them could get around the cards. They are the app's state, not your files.
+- **A `.git`, `.codex` or `.agents` folder directly in `/homeassistant`, `/share` or `/media` is read-only.** For example,
+  `/homeassistant/.git` needs a card, but `/share/<repository>/.git` does not. Why: this is Codex's own sandbox rule, not
+  the app's. In a project, these folders hold history, settings or skills that Codex loads, so a change there could
+  change what Codex does next. `/media/.agents` is a writable place of its own, so Codex's working folder is not
+  affected.
+
+More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#sandbox).
 
 ## Get help
 

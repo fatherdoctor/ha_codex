@@ -17,8 +17,9 @@ on a test Home Assistant first.
 
 - A chat page in Home Assistant, with saved conversations and a task queue. Codex works in a sandbox.
 - In the default mode, Codex edits files in your configuration folder without a question. It asks before a command
-  that uses the network, a write outside your configuration folder and `/share`, or a change to a device. Only an
-  administrator can answer. The other [permission modes](#permission-modes) ask less or more.
+  that uses the network, a write outside your configuration folder, `/share`, `/media` and the app's own folder
+  (`/addon_config`, where its `AGENTS.md` is), or a change to a device. Only an administrator can answer. The other
+  [permission modes](#permission-modes) ask less or more.
 - Codex is told to save the earlier copy of a file before it changes it, and the chat lists the copies it saved. A
   copy can be missing, and `secrets.yaml` and the files under `.storage` (dashboards kept there too) are never
   copied, so keep your own Home Assistant backups ([Backups](docs/app-reference.md#backups)).
@@ -66,7 +67,7 @@ and workspace access vary. See [OpenAI's current availability](https://help.open
 1. **Add the app repository.** **Settings** > **Apps** > **Install app** > menu (top right) > **Repositories**. Add
    `https://github.com/fatherdoctor/ha_codex`.
 2. **Install and start the app.** Install **Codex for Home Assistant**, read its options and start it. At start, the
-   app installs the Codex integration of the same version in `/config/custom_components/codex_cli`.
+   app installs the Codex integration of the same version in `/homeassistant/custom_components/codex_cli`.
 3. **Restart Home Assistant once.** A notification asks for it: **Settings** > **System** > restart.
 4. **Add the integration.** **Settings** > **Devices & services** shows **Discovered: Codex**. Choose **Add**. It
    finds the app by itself; there is no address or token to enter. If nothing is shown, choose **Add integration** >
@@ -102,8 +103,10 @@ The app's own install of the integration (steps 2 to 4) needs nothing else.
 
 Every app option is in [docs/app-reference.md](docs/app-reference.md).
 
-Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/config`. The chat has an editor for it under **Settings** > **Workspace instructions** >
-**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
+Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/homeassistant`. The chat has an editor for it under **Settings** > **Workspace instructions** >
+**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. It also sends its built-in
+instructions (folders, tools, logs, secrets and GitHub; shown above the editor, updated with the app), and your
+workspace instructions take priority over them. A new
 install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating
@@ -158,7 +161,7 @@ only Codex's own settings.
 
 | Mode | What Codex can do without asking |
 |---|---|
-| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder and `/share` need your permission. |
+| Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder, `/share`, `/media` and the app's own folder need your permission. |
 | Approve for me | As Ask for approval, but Codex's own reviewer answers each request instead of you. |
 | Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
@@ -171,8 +174,9 @@ and **Deny**. Only a Home Assistant administrator can answer it.
 Codex's own permission modes and the sandbox are the protection, as in the Claude add-on. The app adds no command
 check of its own.
 
-- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides
-  `secrets.yaml`, Home Assistant's sign-in store and the app's own private files.
+- **The sandbox.** Commands run with their own user, mount, process and network space. The sandbox hides the app's
+  own private files. It hides nothing in `/homeassistant`, as in the Claude add-on: `secrets.yaml` and `.storage` are left
+  to your `AGENTS.md`.
 - **Complete cards.** A command or file change that is incomplete, too large or redacted can be denied but never
   allowed: its card has no **Allow once** button.
 - **A protected policy.** The allowed modes come from a file inside the app image. Options and chats cannot loosen it.
@@ -182,13 +186,13 @@ What the safeguards do not do:
 - They do not promise that every action is safe or can be undone. **Read each permission card before you allow it.**
 - An allowed command runs outside the sandbox, with the app's file and network access. Nothing stops it from
   reading a private file or changing the app's settings.
-- The app does not check what Codex writes in `/config`. An edit can add a shell command that Home Assistant runs
+- The app does not check what Codex writes in `/homeassistant`. An edit can add a shell command that Home Assistant runs
   later; review what a chat changed before you reload or restart.
 - Backups depend on Codex following its instructions, and `secrets.yaml` and the files under `.storage` are never
   copied. Keep your own Home Assistant backups.
 
 The app asks for no host networking, Docker access or elevated Supervisor roles, and it keeps AppArmor on. Your
-`/config` folder is mounted for writing, because editing it is the purpose of the app. More detail:
+`/homeassistant` folder is mounted for writing, because editing it is the purpose of the app. More detail:
 [Security Model](docs/app-reference.md#security-model), [Sandbox](docs/app-reference.md#sandbox) and
 [Backups](docs/app-reference.md#backups).
 
@@ -213,8 +217,9 @@ Open a chat's menu and choose **Schedule**. You save a name, a prompt, a model a
 or a custom interval, cron rule or single time, in your Home Assistant time zone. A run continues the chat you scheduled.
 **Settings** > **Scheduled runs** lists every schedule.
 
-- A schedule you save is approved when you save it. Codex can only propose one; it stays off until an administrator
-  reads the full prompt and approves it.
+- A schedule you save is approved when you save it. Codex can only propose a repeating schedule; it stays off until
+  an administrator reads the full prompt and approves it. A one-time wakeup that Codex proposes runs at its time
+  without approval, in the chat it came from.
 - A scheduled run asks for permission like any other run and waits for you in its chat.
 - Limits: 100 approved schedules, 24 runs per schedule per UTC day, and 64 scheduled runs per UTC day.
 

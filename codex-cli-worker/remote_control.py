@@ -38,6 +38,8 @@ from typing import Any
 
 import websocket
 
+from app_paths import CONFIG_ROOT
+
 # Remote control is paused in this version (the ChatGPT app could read a chat but not reply while this app kept it loaded). While
 # PAUSED is True the remote-control process never starts and the owner's saved choice is kept untouched, so turning
 # it back on in a later version is this one line. The tests set it to False to check the code that returns.
@@ -243,13 +245,15 @@ class Supervisor:
         instructions_factory: Callable[[], str] = lambda: "",
         tool_args_factory: Callable[[], list[str]] = lambda: [],
         launch_env_factory: Callable[[], dict[str, str]] | None = None,
+        workdir_factory: Callable[[], str] = lambda: CONFIG_ROOT.as_posix(),
     ) -> None:
         """Keep the factories and fakes the process needs.
 
         env_factory gives the environment of the probe (the namespace check), which
         runs for every Start request. launch_env_factory, when given, gives the environment of a real launch
         only; it may start the launch's read session, because a probe or a second Start never calls it.
-        Without it, env_factory serves both.
+        Without it, env_factory serves both. workdir_factory gives the folder the process starts in: the same
+        working folder as the chat page's Codex, so its instructions and the folder it works in agree.
         """
         self.control_factory = control_factory
         self.instructions_factory = instructions_factory
@@ -259,6 +263,7 @@ class Supervisor:
         self.state_path = state_path
         self.env_factory = env_factory
         self.launch_env_factory = launch_env_factory or env_factory
+        self.workdir_factory = workdir_factory
         self.name_factory = name_factory
         self.popen = popen
         self.run = run
@@ -381,7 +386,8 @@ class Supervisor:
         if self._name_supported is None or self._checked_name != name:
             self._checked_name = name
             try:
-                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()), cwd="/config",
+                probe = self.run(build_command("/bin/true", name), env=remote_env(self.env_factory()),
+                                 cwd=self.workdir_factory(),
                                  capture_output=True, text=True, timeout=10, check=False)
                 self._name_supported = probe.returncode == 0
             except (OSError, subprocess.SubprocessError):
@@ -437,7 +443,7 @@ class Supervisor:
                         private.cleanup()
                         return
                     proc = self.popen(command,
-                                      env=environment, cwd="/config", stdin=subprocess.DEVNULL,
+                                      env=environment, cwd=self.workdir_factory(), stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                       start_new_session=True)
                     self.proc = proc

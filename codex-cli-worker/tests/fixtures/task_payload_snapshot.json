@@ -1,0 +1,2060 @@
+{
+  "cancelled": {
+    "events": [
+      {
+        "data": {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "codex_status": "cancelled",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "details": "",
+          "lovelace_results": [],
+          "question": "",
+          "recovery_files": [],
+          "response": {
+            "details": "",
+            "question": "",
+            "status": "cancelled",
+            "summary": "Task cancelled"
+          },
+          "returncode": null,
+          "session_id": "",
+          "status": "cancelled",
+          "summary": "Task cancelled",
+          "task_id": "<task>",
+          "validation_errors": []
+        },
+        "event": "codex_cli_task_result"
+      }
+    ],
+    "index": {
+      "attachments": [],
+      "backups": [],
+      "cancellation_event_emitted": true,
+      "cancellation_requested": true,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "",
+      "error": "",
+      "lovelace_results": [],
+      "permission_mode": "default",
+      "question": "",
+      "recovery_files": [],
+      "returncode": null,
+      "status": "cancelled",
+      "summary": "Task cancelled",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "updated_at": "<time>",
+      "validation_errors": []
+    },
+    "payload": {
+      "attachments": [],
+      "backups": [],
+      "can_continue": false,
+      "cancellation_event_emitted": true,
+      "cancellation_requested": true,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "deletion_warning": null,
+      "details": "",
+      "error": "",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "permission_mode": "default",
+      "permission_required": false,
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": null,
+      "status": "cancelled",
+      "summary": "Task cancelled",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "turns": [
+        {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": null,
+          "status": "cancelled",
+          "summary": "Task cancelled",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": []
+    },
+    "summary": {
+      "archived": false,
+      "can_continue": false,
+      "created_at": "<time>",
+      "deletion_warning": null,
+      "permission_required": false,
+      "pinned": false,
+      "question": "",
+      "status": "cancelled",
+      "summary": "Task cancelled",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "unread": false,
+      "updated_at": "<time>"
+    },
+    "task_json": {
+      "attachments": [],
+      "backups": [],
+      "cancellation_event_emitted": true,
+      "cancellation_requested": true,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "",
+      "error": "",
+      "lovelace_results": [],
+      "permission_mode": "default",
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": null,
+      "status": "cancelled",
+      "summary": "Task cancelled",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "turns": [
+        {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": null,
+          "status": "cancelled",
+          "summary": "Task cancelled",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": []
+    }
+  },
+  "completed": {
+    "events": [
+      {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "codex_status": "completed",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "details": "Removed the copies.",
+          "lovelace_results": [],
+          "question": "",
+          "recovery_files": [],
+          "response": {
+            "choices": [],
+            "details": "Removed the copies.",
+            "question": "",
+            "status": "completed",
+            "summary": "Two duplicates removed."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+          "status": "completed",
+          "summary": "Two duplicates removed.",
+          "task_id": "<task>",
+          "turn_id": "<turn-1>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        },
+        "event": "codex_cli_task_result"
+      }
+    ],
+    "index": {
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "Removed the copies.",
+      "error": "",
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "question": "",
+      "recovery_files": [],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "completed",
+      "summary": "Two duplicates removed.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "payload": {
+      "attachments": [],
+      "can_continue": true,
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "deletion_warning": null,
+      "details": "Removed the copies.",
+      "error": "",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "permission_required": false,
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "completed",
+      "summary": "Two duplicates removed.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "Removed the copies.",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "completed",
+          "summary": "Two duplicates removed.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "summary": {
+      "archived": false,
+      "can_continue": true,
+      "created_at": "<time>",
+      "deletion_warning": null,
+      "permission_required": false,
+      "pinned": false,
+      "question": "",
+      "status": "completed",
+      "summary": "Two duplicates removed.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "unread": false,
+      "updated_at": "<time>"
+    },
+    "task_json": {
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "Removed the copies.",
+      "error": "",
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "completed",
+      "summary": "Two duplicates removed.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "Removed the copies.",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "completed",
+          "summary": "Two duplicates removed.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    }
+  },
+  "failed": {
+    "events": [
+      {
+        "data": {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "codex_status": "failed",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "details": "Could not start /usr/local/bin/codex: no such file",
+          "lovelace_results": [],
+          "question": "",
+          "recovery_files": [],
+          "response": {
+            "details": "Could not start /usr/local/bin/codex: no such file",
+            "question": "",
+            "status": "failed",
+            "summary": "Could not start the Codex CLI executable."
+          },
+          "returncode": null,
+          "session_id": "",
+          "status": "failed",
+          "summary": "Could not start the Codex CLI executable.",
+          "task_id": "<task>",
+          "validation_errors": []
+        },
+        "event": "codex_cli_task_result"
+      }
+    ],
+    "index": {
+      "attachments": [],
+      "backups": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "Could not start /usr/local/bin/codex: no such file",
+      "error": "Could not start /usr/local/bin/codex: no such file",
+      "lovelace_results": [],
+      "permission_mode": "default",
+      "question": "",
+      "recovery_files": [],
+      "returncode": null,
+      "status": "failed",
+      "summary": "Could not start the Codex CLI executable.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "updated_at": "<time>",
+      "validation_errors": []
+    },
+    "payload": {
+      "attachments": [],
+      "backups": [],
+      "can_continue": false,
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "deletion_warning": null,
+      "details": "Could not start /usr/local/bin/codex: no such file",
+      "error": "Could not start /usr/local/bin/codex: no such file",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "permission_mode": "default",
+      "permission_required": false,
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": null,
+      "status": "failed",
+      "summary": "Could not start the Codex CLI executable.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "turns": [
+        {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "Could not start /usr/local/bin/codex: no such file",
+          "error": "Could not start /usr/local/bin/codex: no such file",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": null,
+          "status": "failed",
+          "summary": "Could not start the Codex CLI executable.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": []
+    },
+    "summary": {
+      "archived": false,
+      "can_continue": false,
+      "created_at": "<time>",
+      "deletion_warning": null,
+      "permission_required": false,
+      "pinned": false,
+      "question": "",
+      "status": "failed",
+      "summary": "Could not start the Codex CLI executable.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "unread": false,
+      "updated_at": "<time>"
+    },
+    "task_json": {
+      "attachments": [],
+      "backups": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "Could not start /usr/local/bin/codex: no such file",
+      "error": "Could not start /usr/local/bin/codex: no such file",
+      "lovelace_results": [],
+      "permission_mode": "default",
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": null,
+      "status": "failed",
+      "summary": "Could not start the Codex CLI executable.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "turns": [
+        {
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "Could not start /usr/local/bin/codex: no such file",
+          "error": "Could not start /usr/local/bin/codex: no such file",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": null,
+          "status": "failed",
+          "summary": "Could not start the Codex CLI executable.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": []
+    }
+  },
+  "permission": {
+    "events": [],
+    "index": {
+      "approval_counts": {
+        "command": 1,
+        "command_input": 0,
+        "file_change": 0,
+        "other": 0,
+        "total": 1
+      },
+      "approvals": [
+        {
+          "approval_id": "<turn-2>",
+          "can_allow": true,
+          "changes": [],
+          "command": "ls /homeassistant",
+          "confirmation": {
+            "effect": "Only what that command does; it may read files and use the network.",
+            "what": "Run one command outside the sandbox, shown below.",
+            "where": "In /homeassistant."
+          },
+          "cwd": "/homeassistant",
+          "kind": "command",
+          "note": "Known credentials are hidden. This does not change your sandbox setting or approve future requests.",
+          "prompt_kind": "command",
+          "reason": "List the configuration folder",
+          "requested_at": "<time>",
+          "scope": "Allow this command once outside the configured sandbox. It may access the network and files available to the app, including files outside /homeassistant.",
+          "status": "pending",
+          "turn_id": "<turn-1>"
+        }
+      ],
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "",
+      "error": "",
+      "page_instructions": true,
+      "permission_mode": "default",
+      "question": "",
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "running",
+      "summary": "",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "updated_at": "<time>",
+      "verification": [],
+      "verification_attachments": []
+    },
+    "payload": {
+      "approval_counts": {
+        "command": 1,
+        "command_input": 0,
+        "file_change": 0,
+        "other": 0,
+        "total": 1
+      },
+      "approvals": [
+        {
+          "approval_id": "<turn-2>",
+          "can_allow": true,
+          "changes": [],
+          "command": "ls /homeassistant",
+          "confirmation": {
+            "effect": "Only what that command does; it may read files and use the network.",
+            "what": "Run one command outside the sandbox, shown below.",
+            "where": "In /homeassistant."
+          },
+          "cwd": "/homeassistant",
+          "kind": "command",
+          "note": "Known credentials are hidden. This does not change your sandbox setting or approve future requests.",
+          "prompt_kind": "command",
+          "reason": "List the configuration folder",
+          "requested_at": "<time>",
+          "scope": "Allow this command once outside the configured sandbox. It may access the network and files available to the app, including files outside /homeassistant.",
+          "status": "pending",
+          "turn_id": "<turn-1>"
+        }
+      ],
+      "attachments": [],
+      "can_continue": false,
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "deletion_warning": null,
+      "details": "",
+      "error": "",
+      "history_incomplete": false,
+      "page_instructions": true,
+      "permission_mode": "default",
+      "permission_required": true,
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "running",
+      "summary": "",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "turns": [
+        {
+          "approvals": [
+            {
+              "approval_id": "<turn-2>",
+              "can_allow": true,
+              "changes": [],
+              "command": "ls /homeassistant",
+              "confirmation": {
+                "effect": "Only what that command does; it may read files and use the network.",
+                "what": "Run one command outside the sandbox, shown below.",
+                "where": "In /homeassistant."
+              },
+              "cwd": "/homeassistant",
+              "kind": "command",
+              "note": "Known credentials are hidden. This does not change your sandbox setting or approve future requests.",
+              "prompt_kind": "command",
+              "reason": "List the configuration folder",
+              "requested_at": "<time>",
+              "scope": "Allow this command once outside the configured sandbox. It may access the network and files available to the app, including files outside /homeassistant.",
+              "status": "pending",
+              "turn_id": "<turn-1>"
+            }
+          ],
+          "attachments": [],
+          "choices": [],
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "started_at": "<time>",
+          "status": "running",
+          "summary": "",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "verification": [],
+      "verification_attachments": []
+    },
+    "summary": {
+      "archived": false,
+      "can_continue": false,
+      "created_at": "<time>",
+      "deletion_warning": null,
+      "permission_required": true,
+      "pinned": false,
+      "question": "",
+      "status": "running",
+      "summary": "",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "unread": false,
+      "updated_at": "<time>"
+    },
+    "task_json": {
+      "approval_counts": {
+        "command": 1,
+        "command_input": 0,
+        "file_change": 0,
+        "other": 0,
+        "total": 1
+      },
+      "approvals": [
+        {
+          "approval_id": "<turn-2>",
+          "can_allow": true,
+          "changes": [],
+          "command": "ls /homeassistant",
+          "confirmation": {
+            "effect": "Only what that command does; it may read files and use the network.",
+            "what": "Run one command outside the sandbox, shown below.",
+            "where": "In /homeassistant."
+          },
+          "cwd": "/homeassistant",
+          "kind": "command",
+          "note": "Known credentials are hidden. This does not change your sandbox setting or approve future requests.",
+          "prompt_kind": "command",
+          "reason": "List the configuration folder",
+          "requested_at": "<time>",
+          "scope": "Allow this command once outside the configured sandbox. It may access the network and files available to the app, including files outside /homeassistant.",
+          "status": "pending",
+          "turn_id": "<turn-1>"
+        }
+      ],
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "",
+      "error": "",
+      "page_instructions": true,
+      "permission_mode": "default",
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "running",
+      "summary": "",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "turns": [
+        {
+          "approvals": [
+            {
+              "approval_id": "<turn-2>",
+              "can_allow": true,
+              "changes": [],
+              "command": "ls /homeassistant",
+              "confirmation": {
+                "effect": "Only what that command does; it may read files and use the network.",
+                "what": "Run one command outside the sandbox, shown below.",
+                "where": "In /homeassistant."
+              },
+              "cwd": "/homeassistant",
+              "kind": "command",
+              "note": "Known credentials are hidden. This does not change your sandbox setting or approve future requests.",
+              "prompt_kind": "command",
+              "reason": "List the configuration folder",
+              "requested_at": "<time>",
+              "scope": "Allow this command once outside the configured sandbox. It may access the network and files available to the app, including files outside /homeassistant.",
+              "status": "pending",
+              "turn_id": "<turn-1>"
+            }
+          ],
+          "attachments": [],
+          "choices": [],
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "started_at": "<time>",
+          "status": "running",
+          "summary": "",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "verification": [],
+      "verification_attachments": []
+    }
+  },
+  "question": {
+    "events": [
+      {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [
+            "Go ahead",
+            "Don't change anything"
+          ],
+          "codex_status": "needs_input",
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "details": "",
+          "lovelace_results": [],
+          "question": "Remove the duplicate?",
+          "recovery_files": [],
+          "response": {
+            "choices": [
+              "Go ahead",
+              "Don't change anything"
+            ],
+            "details": "",
+            "question": "Remove the duplicate?",
+            "status": "needs_input",
+            "summary": "Two automations are duplicates."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "task_id": "<task>",
+          "turn_id": "<turn-1>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        },
+        "event": "codex_cli_task_result"
+      }
+    ],
+    "index": {
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [
+        "Go ahead",
+        "Don't change anything"
+      ],
+      "completed_at": "",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "",
+      "error": "",
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "question": "Remove the duplicate?",
+      "recovery_files": [],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "waiting_for_input",
+      "summary": "Two automations are duplicates.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "payload": {
+      "attachments": [],
+      "can_continue": true,
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [
+        "Go ahead",
+        "Don't change anything"
+      ],
+      "completed_at": "",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "deletion_warning": null,
+      "details": "",
+      "error": "",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "permission_required": false,
+      "prompt": "Tidy up my automations",
+      "question": "Remove the duplicate?",
+      "recovery_files": [],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "waiting_for_input",
+      "summary": "Two automations are duplicates.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [
+            "Go ahead",
+            "Don't change anything"
+          ],
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "Remove the duplicate?",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "summary": {
+      "archived": false,
+      "can_continue": true,
+      "created_at": "<time>",
+      "deletion_warning": null,
+      "permission_required": false,
+      "pinned": false,
+      "question": "Remove the duplicate?",
+      "status": "waiting_for_input",
+      "summary": "Two automations are duplicates.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "unread": false,
+      "updated_at": "<time>"
+    },
+    "task_json": {
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [
+        "Go ahead",
+        "Don't change anything"
+      ],
+      "completed_at": "",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "",
+      "error": "",
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "prompt": "Tidy up my automations",
+      "question": "Remove the duplicate?",
+      "recovery_files": [],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "waiting_for_input",
+      "summary": "Two automations are duplicates.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [
+            "Go ahead",
+            "Don't change anything"
+          ],
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "Remove the duplicate?",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    }
+  },
+  "reply": {
+    "events": [
+      {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [
+            "Go ahead"
+          ],
+          "codex_status": "needs_input",
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "details": "",
+          "lovelace_results": [],
+          "question": "Remove the duplicate?",
+          "recovery_files": [],
+          "response": {
+            "choices": [
+              "Go ahead"
+            ],
+            "details": "",
+            "question": "Remove the duplicate?",
+            "status": "needs_input",
+            "summary": "Two automations are duplicates."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "task_id": "<task>",
+          "turn_id": "<turn-1>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        },
+        "event": "codex_cli_task_result"
+      },
+      {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "codex_status": "completed",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "details": "",
+          "lovelace_results": [],
+          "question": "",
+          "recovery_files": [],
+          "response": {
+            "choices": [],
+            "details": "",
+            "question": "",
+            "status": "completed",
+            "summary": "Removed it."
+          },
+          "returncode": 0,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+          "status": "completed",
+          "summary": "Removed it.",
+          "task_id": "<task>",
+          "turn_id": "<turn-2>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        },
+        "event": "codex_cli_task_result"
+      }
+    ],
+    "index": {
+      "approvals": [],
+      "attachments": [],
+      "backups": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-2>",
+      "details": "",
+      "error": "",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "question": "",
+      "recovery_files": [],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "completed",
+      "summary": "Removed it.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "payload": {
+      "approvals": [],
+      "attachments": [],
+      "backups": [],
+      "can_continue": true,
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-2>",
+      "deletion_warning": null,
+      "details": "",
+      "error": "",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "permission_required": false,
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "reply_history": [
+        {
+          "at": "<time>",
+          "reply": "Go ahead"
+        }
+      ],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "completed",
+      "summary": "Removed it.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [
+            "Go ahead"
+          ],
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "Remove the duplicate?",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        },
+        {
+          "approvals": [],
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Go ahead",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "completed",
+          "summary": "Removed it.",
+          "turn_id": "<turn-2>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "summary": {
+      "archived": false,
+      "can_continue": true,
+      "created_at": "<time>",
+      "deletion_warning": null,
+      "permission_required": false,
+      "pinned": false,
+      "question": "",
+      "status": "completed",
+      "summary": "Removed it.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "unread": false,
+      "updated_at": "<time>"
+    },
+    "task_json": {
+      "approvals": [],
+      "attachments": [],
+      "backups": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-2>",
+      "details": "",
+      "error": "",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "reply_history": [
+        {
+          "at": "<time>",
+          "reply": "Go ahead"
+        }
+      ],
+      "returncode": 0,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "completed",
+      "summary": "Removed it.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [
+            "Go ahead"
+          ],
+          "completed_at": "",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "Remove the duplicate?",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "waiting_for_input",
+          "summary": "Two automations are duplicates.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        },
+        {
+          "approvals": [],
+          "attachments": [],
+          "backups": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "",
+          "error": "",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Go ahead",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": 0,
+          "started_at": "<time>",
+          "status": "completed",
+          "summary": "Removed it.",
+          "turn_id": "<turn-2>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    }
+  },
+  "timeout": {
+    "events": [
+      {
+        "data": {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "codex_status": "failed",
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "details": "Codex exited before writing the final response file (returncode=1).",
+          "lovelace_results": [],
+          "question": "",
+          "recovery_files": [],
+          "response": {
+            "choices": [],
+            "details": "Codex exited before writing the final response file (returncode=1).",
+            "question": "",
+            "status": "failed",
+            "summary": "Codex timed out after 1 seconds."
+          },
+          "returncode": 1,
+          "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+          "status": "failed",
+          "summary": "Codex timed out after 1 seconds.",
+          "task_id": "<task>",
+          "turn_id": "<turn-1>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        },
+        "event": "codex_cli_task_result"
+      }
+    ],
+    "index": {
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "Codex exited before writing the final response file (returncode=1).",
+      "error": "Codex timed out after 1 seconds.",
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "question": "",
+      "recovery_files": [],
+      "returncode": 1,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "failed",
+      "summary": "Codex timed out after 1 seconds.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "payload": {
+      "attachments": [],
+      "can_continue": true,
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "deletion_warning": null,
+      "details": "Codex exited before writing the final response file (returncode=1).",
+      "error": "Codex timed out after 1 seconds.",
+      "history_incomplete": false,
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "permission_required": false,
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": 1,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "failed",
+      "summary": "Codex timed out after 1 seconds.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "Codex exited before writing the final response file (returncode=1).",
+          "error": "Codex timed out after 1 seconds.",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": 1,
+          "started_at": "<time>",
+          "status": "failed",
+          "summary": "Codex timed out after 1 seconds.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    },
+    "summary": {
+      "archived": false,
+      "can_continue": true,
+      "created_at": "<time>",
+      "deletion_warning": null,
+      "permission_required": false,
+      "pinned": false,
+      "question": "",
+      "status": "failed",
+      "summary": "Codex timed out after 1 seconds.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "unread": false,
+      "updated_at": "<time>"
+    },
+    "task_json": {
+      "attachments": [],
+      "cancellation_event_emitted": false,
+      "cancellation_requested": false,
+      "changes": {
+        "added": [],
+        "changed": [],
+        "deleted": []
+      },
+      "chat_settings": {
+        "fast": null,
+        "model": null,
+        "reasoning_effort": null
+      },
+      "choices": [],
+      "completed_at": "<time>",
+      "config_check": {
+        "errors": "",
+        "result": "skipped",
+        "warnings": ""
+      },
+      "created_at": "<time>",
+      "current_turn_id": "<turn-1>",
+      "details": "Codex exited before writing the final response file (returncode=1).",
+      "error": "Codex timed out after 1 seconds.",
+      "lovelace_results": [],
+      "page_instructions": true,
+      "permission_mode": "default",
+      "prompt": "Tidy up my automations",
+      "question": "",
+      "recovery_files": [],
+      "returncode": 1,
+      "session_id": "019fc242-910a-7c92-a17d-54c014e19fc4",
+      "started_at": "<time>",
+      "status": "failed",
+      "summary": "Codex timed out after 1 seconds.",
+      "task_id": "<task>",
+      "title": "Tidy up my automations",
+      "told_permissions": "sandbox workspace-write, approval policy on-request: you can change files inside the sandbox; a command that needs more asks the person for approval.",
+      "told_rules": "<rules-stamp>",
+      "turns": [
+        {
+          "attachments": [],
+          "changes": {
+            "added": [],
+            "changed": [],
+            "deleted": []
+          },
+          "choices": [],
+          "completed_at": "<time>",
+          "config_check": {
+            "errors": "",
+            "result": "skipped",
+            "warnings": ""
+          },
+          "created_at": "<time>",
+          "details": "Codex exited before writing the final response file (returncode=1).",
+          "error": "Codex timed out after 1 seconds.",
+          "execution_settings": {
+            "fast": null,
+            "model": "default",
+            "reasoning_effort": "medium"
+          },
+          "lovelace_results": [],
+          "message": "Tidy up my automations",
+          "permission_mode": "default",
+          "prompt_attachments": [],
+          "question": "",
+          "recovery_files": [],
+          "returncode": 1,
+          "started_at": "<time>",
+          "status": "failed",
+          "summary": "Codex timed out after 1 seconds.",
+          "turn_id": "<turn-1>",
+          "updated_at": "<time>",
+          "validation_errors": [],
+          "verification": [],
+          "verification_attachments": []
+        }
+      ],
+      "updated_at": "<time>",
+      "validation_errors": [],
+      "verification": [],
+      "verification_attachments": []
+    }
+  }
+}

@@ -35,7 +35,8 @@ class ActivityStepTests(unittest.TestCase):
         """Start collecting steps for one running exchange."""
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set())):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set())):
             self.stack.enter_context(patch.object(server, name, value))
         server.tasks["t"] = {"task_id": "t", "status": "running", "current_turn_id": "turn-1"}
         server.start_activity("t", "turn-1")
@@ -50,10 +51,10 @@ class ActivityStepTests(unittest.TestCase):
         events = [
             item("reasoning", "item_0", text="**Checking the automation**"),
             item("agent_message", "item_1", text="I'll read the automation first."),
-            command("item_2", "/bin/sh -lc 'cat /config/automations.yaml'", output="x" * 5000),
-            command("item_3", "/bin/sh -lc \"rg -n foo /config\"", output="", exit_code=1),
+            command("item_2", "/bin/sh -lc 'cat /homeassistant/automations.yaml'", output="x" * 5000),
+            command("item_3", "/bin/sh -lc \"rg -n foo /homeassistant\"", output="", exit_code=1),
             item("file_change", "item_4", status="completed",
-                 changes=[{"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/new.yaml", "kind": "add"}]),
+                 changes=[{"path": "/homeassistant/automations.yaml", "kind": "update"}, {"path": "/homeassistant/new.yaml", "kind": "add"}]),
             item("web_search", "item_5", query="", action={"type": "other"}),
             item("mcp_tool_call", "item_6", server="codex_apps", tool="github.get_repo", status="completed", error=None),
             item("todo_list", "item_7", items=[{"text": "Read config", "completed": True}, {"text": "Edit", "completed": False}]),
@@ -72,11 +73,11 @@ class ActivityStepTests(unittest.TestCase):
         reasoning, message, cat, rg, edit, search, tool, plan = payload["steps"]
         self.assertEqual(reasoning["text"], "Checking the automation")
         self.assertEqual(message["text"], "I'll read the automation first.")
-        self.assertEqual(cat["text"], "cat /config/automations.yaml")
+        self.assertEqual(cat["text"], "cat /homeassistant/automations.yaml")
         self.assertTrue(cat["output_truncated"])
         self.assertEqual(len(cat["output"]), server.ACTIVITY_OUTPUT_MAX + 1)
         self.assertEqual(cat["status"], "done")
-        self.assertEqual(rg["text"], "rg -n foo /config")
+        self.assertEqual(rg["text"], "rg -n foo /homeassistant")
         self.assertEqual((rg["status"], rg["exit_code"]), ("failed", 1))
         self.assertEqual(edit["text"], "Edited automations.yaml, Added new.yaml")
         self.assertEqual(edit["files"], [{"path": "automations.yaml", "kind": "update"}, {"path": "new.yaml", "kind": "add"}])
@@ -101,8 +102,8 @@ class ActivityStepTests(unittest.TestCase):
 
     def test_file_change_reads_as_made_only_once_it_was_made(self):
         """A change that waits, as for permission, or that was refused is not reported as done."""
-        changes = [{"path": "/config/automations.yaml", "kind": "update"}, {"path": "/config/old.yaml", "kind": "delete"},
-                   {"path": "/config/new.yaml", "kind": "add"}, {"path": "/config/moved.yaml", "kind": "other"}]
+        changes = [{"path": "/homeassistant/automations.yaml", "kind": "update"}, {"path": "/homeassistant/old.yaml", "kind": "delete"},
+                   {"path": "/homeassistant/new.yaml", "kind": "add"}, {"path": "/homeassistant/moved.yaml", "kind": "other"}]
         server.record_activity_event("t", {"type": "item.started", "item": {
             "id": "item_1", "type": "file_change", "status": "in_progress", "changes": changes}})
         waiting = self.steps()["steps"][0]
@@ -156,7 +157,7 @@ class ActivityStepTests(unittest.TestCase):
         self.assertEqual(payload["steps"][-1]["kind"], "notice")
         server.tasks["t"]["status"] = "failed"
         server.tasks["t"]["summary"] = "Codex timed out after 5 seconds."
-        with patch.object(server, "atomic_json_write"):
+        with patch.object(server.task_store, "atomic_json_write"):
             with patch.object(server, "task_root", return_value=Path(tempfile.gettempdir())):
                 server.finish_activity("t")
         self.assertNotIn("t", server.task_activity)
@@ -177,7 +178,8 @@ class ActivityApiTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
-        for name, value in (("tasks", {}), ("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
+        self.stack.enter_context(patch.dict(server.tasks, clear=True))
+        for name, value in (("task_activity", {}), ("active_task_runners", set()), ("running_processes", {})):
             self.stack.enter_context(patch.object(server, name, value))
         self.stack.enter_context(patch.object(server, "task_root", return_value=self.root / "tasks"))
         self.stack.enter_context(patch.object(server, "TASK_STATE_FILE", self.root / "index.json"))
@@ -406,7 +408,7 @@ class ReasoningSummaryOptionTests(unittest.TestCase):
         for configured, expected in (("detailed", "detailed"), ("none", "none"), (None, "concise"), ("auto", "concise"), ("  Concise ", "concise")):
             with self.subTest(configured=configured):
                 self.assertEqual(server.reasoning_summary({"reasoning_summary": configured}), expected)
-        with patch.object(server, "tasks", {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}):
+        with patch.dict(server.tasks, {"t": {"task_id": "t", "turns": [], "chat_settings": server.DEFAULT_CHAT_SETTINGS}}, clear=True):
             session = server.create_approval_session(
                 "t", StubAppServer("thread"), "Prompt", Path("final"), None, {}, {"reasoning_summary": "detailed"},
             )

@@ -6,6 +6,8 @@
 // 3. The steps line keeps its count and its elapsed time.
 // 4. The line sits under the step list, so with the list open the newest thought is next to the newest step.
 // 5. The line is gone once the turn ends, and absent while no reasoning step has text.
+// 6. While the turn runs, its four rows (the steps line, the Thinking line, the progress text and the footer) have
+//    vertical room; a finished reply keeps its own spacing.
 const assert = require("node:assert/strict");
 
 const WIDTHS = [320, 1280];
@@ -16,8 +18,7 @@ const PAGE = "http://127.0.0.1:9137/preview/";
 async function showSteps(page, steps, running = true) {
   await page.evaluate(
     ({ steps, running }) => {
-      clearTimeout(activityTimer);
-      activityTimer = null;
+      polls.activity.stop();
       state.task.status = running ? "running" : "completed";
       state.latestChecks = null;
       const activity = state.activity?.id === state.id ? state.activity : null;
@@ -56,6 +57,16 @@ async function checkWidth(page, label) {
   await showSteps(page, [step(1, "reasoning", "Reviewing the\ninput")]);
   assert.equal(await thinkingText(page), "Thinking: Reviewing the input", `${label}: line breaks fold into spaces`);
   assert.match(await page.locator(".activity-toggle").textContent(), /1 step.*3s/, `${label}: count and time stay`);
+  const pad = (selector) => page.locator(selector).evaluate((el) => getComputedStyle(el).paddingBottom);
+  assert.equal(await pad(".activity-toggle"), "8px", `${label}: the running steps line has room`);
+  assert.equal(await pad(".activity-thinking"), "10px", `${label}: the Thinking line has room under it`);
+  const style = (selector, name) => page.locator(selector).evaluate((el, name) => getComputedStyle(el)[name], name);
+  const footer = "#activity ~ .answer .turn-meta";
+  assert.equal(await style(footer, "marginTop"), "22px", `${label}: the footer has room above it`);
+  await showSteps(page, [step(1, "reasoning", "Reviewing the input"), step(2, "message", "Reading the files")]);
+  const progress = "#activity-text > .message";
+  assert.equal(await style(progress, "marginTop"), "6px", `${label}: the progress text has room above it`);
+  assert.equal(await style(progress, "marginBottom"), "16px", `${label}: the progress text has room under it`);
 
   await showSteps(page, [step(1, "reasoning", "Checking the results")]);
   assert.equal(await thinkingText(page), "Thinking: Checking the results", `${label}: an update replaces the line`);
@@ -74,6 +85,8 @@ async function checkWidth(page, label) {
 
   await showSteps(page, [step(1, "reasoning", "Latest summary", "done")], false);
   assert.equal(await thinkingText(page), null, `${label}: gone once the turn ends`);
+  assert.equal(await pad(".activity-toggle"), "4px", `${label}: a finished list keeps its spacing`);
+  assert.equal(await style(footer, "marginTop"), "15px", `${label}: a finished footer keeps its spacing`);
 
   await showSteps(page, [step(3, "command", "Checking")]);
   assert.equal(await thinkingText(page), null, `${label}: absent without a summary`);
