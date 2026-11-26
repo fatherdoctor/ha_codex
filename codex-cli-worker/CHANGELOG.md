@@ -15,6 +15,12 @@
   0.6"); keep them in your file if you want them. A chat from before the update gets the built-in instructions with
   its next message.
 
+- **Generated images go to `/media`.** An image Codex generates is now stored in its working folder, at
+  `/media/.agents/codex/files/<date>/<chat id>/`, not in the app's private storage, so it no longer makes the app's
+  backup larger (Home Assistant's automatic backup leaves `/media` out). The chat page shows it as before. The app
+  never removes these files, not even with the chat: remove old ones from the Media browser, Samba or a terminal.
+  Images from earlier versions stay where they are. Codex's own copy in `/data/codex-home/generated_images` is not
+  changed yet.
 - **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
   the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
   selects the code instead, so you can copy it by hand.
