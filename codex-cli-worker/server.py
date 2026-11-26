@@ -1395,9 +1395,9 @@ def restore_saved_task(task_id: str, task: dict[str, Any]) -> bool:
             forget_secret_diffs(approvals)
             secrets_forgotten = True
     if task.get("status") in {"queued", "running"}:
-        task["status"] = "failed"
-        task["summary"] = task["error"] = "Worker restarted while this task was active."
-        sync_current_turn(task)
+        message = "Worker restarted while this task was active."
+        task_store.record_result(task, {"status": "failed", "summary": message, "error": message},
+                                 str(task.get("updated_at") or utc_now()))
     if waited and not task_waits_on_owner(task):
         dismiss_wait_notice_async(task_id)
     return secrets_forgotten
@@ -2586,11 +2586,6 @@ task_turns = task_store.task_turns
 def atomic_json_write(path: Path, value: Any) -> None:
     """Replace a JSON file in one step; the worker-owned tools write task.json through this name."""
     task_store.atomic_json_write(path, value)
-
-
-def sync_current_turn(task: dict[str, Any]) -> None:
-    """Keep this exchange's outcome alongside the compatible task-level result."""
-    task_store.sync_current_turn(task, utc_now())
 
 
 def new_turn(message: str) -> dict[str, Any]:
@@ -5861,10 +5856,12 @@ def request_task_cancellation(
 
         waited = task_waits_on_owner(task)
         completed_at = str(task.get("completed_at") or utc_now())
-        task.update(
+        task["cancellation_requested"] = True
+        task["updated_at"] = utc_now()
+        task_store.record_result(
+            task,
             {
                 "status": "cancelled",
-                "cancellation_requested": True,
                 "completed_at": completed_at,
                 "returncode": None,
                 "summary": CANCELLED_TASK_SUMMARY,
@@ -5878,10 +5875,9 @@ def request_task_cancellation(
                 "config_check": dict(EMPTY_CONFIG_CHECK),
                 "recovery_files": [],
                 "backups": [],
-                "updated_at": utc_now(),
-            }
+            },
+            task["updated_at"],
         )
-        sync_current_turn(task)
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         task_store.atomic_json_write(task_dir / "task.json", task)
@@ -5906,10 +5902,8 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
             return False
 
         task["cancellation_event_emitted"] = True
-        if returncode is not None:
-            task["returncode"] = returncode
         task["updated_at"] = utc_now()
-        sync_current_turn(task)
+        task_store.record_result(task, {} if returncode is None else {"returncode": returncode}, task["updated_at"])
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         task_store.atomic_json_write(task_dir / "task.json", task)
@@ -6088,7 +6082,9 @@ def record_background_start_failure(task_id: str, exc: Exception) -> None:
         with lock:
             task = tasks.setdefault(task_id, {"task_id": task_id})
             if not task.get("cancellation_requested"):
-                task.update(
+                task["updated_at"] = completed_at
+                task_store.record_result(
+                    task,
                     {
                         "status": "failed",
                         "completed_at": completed_at,
@@ -6104,8 +6100,8 @@ def record_background_start_failure(task_id: str, exc: Exception) -> None:
                         "config_check": dict(EMPTY_CONFIG_CHECK),
                         "recovery_files": [],
                         "backups": [],
-                        "updated_at": completed_at,
-                    }
+                    },
+                    completed_at,
                 )
         print(
             "Could not persist background task startup failure: "
