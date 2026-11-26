@@ -169,11 +169,12 @@ class ExchangeRecordTests(unittest.TestCase):
     run_codex = attachments.AttachmentTests.run_codex
 
     def test_a_page_thread_has_the_rules_and_its_messages_are_the_owner_text(self):
-        """The first exchange marks the thread; a follow-up gets no pointer and exchange_info holds no rules."""
+        """The first exchange records the rules it was told; a follow-up gets no pointer and exchange_info holds no rules."""
         task_id = self.create(OWNER_TEXT)
         info, message = self.run_and_record_plain(task_id)
         self.assertEqual(message, "Draw a sheep")
-        self.assertTrue(server.tasks[task_id]["page_instructions"])
+        self.assertEqual(server.tasks[task_id]["told_rules"], server.rules_stamp(server.build_page_instructions()))
+        self.assertTrue(server.tasks[task_id]["page_instructions"])  # still written, for 0.5 after a rollback
         self.assertNotIn("rules", info)
         self.assertEqual(info["task_id"], task_id)
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And now the porch")
@@ -187,14 +188,33 @@ class ExchangeRecordTests(unittest.TestCase):
         """
         task_id = self.create(OWNER_TEXT)
         server.update_task(task_id, session_id=attachments.SESSION_ID)
-        self.assertNotIn("page_instructions", server.tasks[task_id])
+        self.assertNotIn("told_rules", server.tasks[task_id])
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch light")
         # Its permissions are told once too: what the app set for the thread is not known here.
         changed = server.PERMISSIONS_CHANGED.format(note=info["permissions"])
         self.assertEqual(message, server.RULES_POINTER + "\n\n" + changed + "\n\nCheck the porch light")
         self.assertEqual(info["rules"], server.build_page_instructions())
-        # A resume never marks the thread: only a thread this page starts gets the rules at its first turn.
-        self.assertNotIn("page_instructions", server.tasks[task_id])
+        # Told once: the next message has no pointer and exchange_info no rules.
+        info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
+        self.assertEqual(message, "And the gate")
+        self.assertNotIn("rules", info)
+
+    def test_a_chat_from_before_an_update_gets_the_new_rules_once(self):
+        """A chat whose thread was told older rules (0.5 kept only a page_instructions flag) is pointed to the new ones.
+
+        Codex keeps a thread's first developer instructions until a compaction, so the resume alone does not reach it.
+        """
+        for record in ({"page_instructions": True}, {"told_rules": server.rules_stamp("rules of an older version")}):
+            with self.subTest(record=record):
+                task_id = self.create(OWNER_TEXT)
+                server.update_task(task_id, session_id=attachments.SESSION_ID, **record)
+                info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix it")
+                self.assertTrue(message.startswith(server.RULES_POINTER + "\n\n"))
+                self.assertEqual(info["rules"], server.build_page_instructions())
+                self.assertIn(server.BUILTIN_INSTRUCTIONS, info["rules"])
+                info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Again")
+                self.assertEqual(message, "Again")
+                self.assertNotIn("rules", info)
 
     def test_a_chat_switched_to_full_access_is_told_once_on_its_next_message(self):
         """A chat that started in Read only and is switched to Full access is told so on the next message only."""
@@ -227,7 +247,8 @@ class ExchangeRecordTests(unittest.TestCase):
     def test_a_resumed_thread_with_no_record_is_told_its_permissions_once(self):
         """A thread from the ChatGPT app or an earlier version has no record of what it was told."""
         task_id = self.create(OWNER_TEXT)
-        server.update_task(task_id, session_id=attachments.SESSION_ID, page_instructions=True)
+        server.update_task(task_id, session_id=attachments.SESSION_ID,
+                           told_rules=server.rules_stamp(server.build_page_instructions()))
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch")
         self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=info["permissions"]) + "\n\nCheck the porch")
         _, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")

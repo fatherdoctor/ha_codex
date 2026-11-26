@@ -2,6 +2,22 @@
 
 ## 0.6.0 (unreleased)
 
+- **Built-in instructions.** The app now sends its own instructions with every chat, on the page and in remote
+  control: the folders, the Home Assistant tools, how to read logs, and the rules for secrets and for Git and GitHub.
+  An update of the app updates them. **Settings** > **Workspace instructions** shows them read-only above the
+  `AGENTS.md` editor. Your `AGENTS.md` takes priority over them.
+- **A shorter starter `AGENTS.md`.** A new install gets only the memory rules (in `/homeassistant/.codex/memory/`)
+  and a rule to rename or delete chats only with the app's tools or page. An existing `AGENTS.md` is never changed.
+  If yours came from an earlier starter, you may remove its secrets and Git and GitHub lines, which now ship with the
+  app, and paste the Memory section from `starter_agents.md`. Two of those lines do not ship with the app: "Open
+  secret files only when the owner asks" and never to stage personal or location data; keep them if you want them.
+  The earlier starter's other rules are gone from the new one too (the list is in the app reference, "From 0.5 to
+  0.6"); keep them in your file if you want them. A chat from before the update gets the built-in instructions with
+  its next message.
+
+- **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
+  the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
+  selects the code instead, so you can copy it by hand.
 - The GitHub card's help text no longer mentions the **Check now** button that 0.5.1 removed. After you add repositories
   on GitHub, it says to press **Accept this access** when it appears, and a failed read test points to the repository list.
 - **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
@@ -28,8 +44,9 @@
   Codex then runs the model on its Fast service tier (about twice the speed; it uses more of your plan). The chip
   shows a small bolt while Fast is on. A chat that never chose follows the model's own default from the Codex model
   list, and each turn that names its model tells Codex the tier, so a choice never carries over by mistake. A turn
-  that does not yet know which model Codex picks sends no tier and leaves the choice to Codex. The button is dimmed
-  for a model without Fast.
+  that names no model (Codex's pick is not known yet, or is a model the app does not know) sends no tier for a chat
+  that chose nothing, and leaves the choice to Codex; a chat that turned Fast on or off keeps its choice. The button
+  is dimmed for a model without Fast.
 - A one-time wakeup that Codex proposes (a schedule with a single time) is now on when Codex saves it. It runs one
   time, as the next message in the chat it came from, and that run still asks for permission like any other. A
   repeating proposal still waits for an administrator's approval. A wakeup counts against the 100 approved
@@ -72,9 +89,17 @@
 - The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
   control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
   share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
+- The chat page's script starts its cut into smaller files. `chat-core.js` holds what every part of the page uses
+  (the element helper, the state, the requests to the worker, `poll()`, `busyAction()`, the icons and the theme), and
+  `chat-settings.js` holds the Settings window and the account lines. The rest stays in `chat.js` for now. The code
+  moved without a change, and nothing looks different.
 - The GitHub card explains its repository count: Codex reaches only the repositories that the GitHub App is installed
   on. A new **Add repositories** link under the list opens the App's Configure page on GitHub, where you add more. The
   link comes from GitHub's answer for the installation and shows only for an App sign-in, not for a token.
+- Integration clean-up, with no change in behavior. Each Codex action now has its own function at the top level of
+  the integration, and one table lists every action with its data schema. The fallback for Home Assistant versions
+  that had no action responses is removed, because the oldest supported version has them. Imports are in Home
+  Assistant's order, and a `raise` of an HTTP error with no arguments has no empty parentheses.
 
 ## 0.5.1 (unreleased)
 

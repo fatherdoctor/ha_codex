@@ -152,6 +152,9 @@ CODEX_AGENTS_LINK = CODEX_HOME / "AGENTS.md"
 AGENTS_MOVE_BACKUP = DATA_ROOT / "agents_before_move.md"
 # The starter text for a home with no AGENTS.md; it ships beside this file in the app image.
 STARTER_AGENTS_PATH = Path(__file__).resolve().parent / "starter_agents.md"
+# The built-in layer of the instructions: the app's own rules (paths, tools, logs, secrets, git), sent with every
+# chat's developer instructions, so an update of the app updates them. The owner's AGENTS.md is the other layer.
+BUILTIN_INSTRUCTIONS = (Path(__file__).resolve().parent / "builtin_instructions.md").read_text(encoding="utf-8").strip()
 TASK_STATE_FILE = DATA_ROOT / "task_index.json"
 MESSAGE_QUEUE_FILE = DATA_ROOT / "message_queue.json"
 HA_DOCS_ROOT = DATA_ROOT / "ha-docs"
@@ -850,7 +853,16 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         effort = "medium"
     if effort is None:
         effort = default_effort(options, model, efforts)
-    return {"model": model, "reasoning_effort": effort, "fast": run_fast(settings.get("fast"), model_fast(named))}
+    return {"model": model, "reasoning_effort": effort, "fast": turn_fast(settings.get("fast"), model, named)}
+
+
+def turn_fast(choice: bool | None, model: str, named: str) -> bool | None:
+    """Return the Fast setting of a turn. On a turn that names no model (turn_model: Codex's pick not yet seen, or a
+    pick the worker does not know), the chat's own choice goes through unchanged, and a chat that chose nothing gets
+    None: the worker does not know the Fast tier of a model it does not name, so it neither guesses one nor drops one."""
+    if not turn_model(model):
+        return choice
+    return run_fast(choice, model_fast(named))
 
 
 def run_fast(choice: bool | None, offered: bool | None) -> bool | None:
@@ -1392,9 +1404,9 @@ def restore_saved_task(task_id: str, task: dict[str, Any]) -> bool:
             forget_secret_diffs(approvals)
             secrets_forgotten = True
     if task.get("status") in {"queued", "running"}:
-        task["status"] = "failed"
-        task["summary"] = task["error"] = "Worker restarted while this task was active."
-        sync_current_turn(task)
+        message = "Worker restarted while this task was active."
+        task_store.record_result(task, {"status": "failed", "summary": message, "error": message},
+                                 str(task.get("updated_at") or utc_now()))
     if waited and not task_waits_on_owner(task):
         dismiss_wait_notice_async(task_id)
     return secrets_forgotten
@@ -2583,11 +2595,6 @@ task_turns = task_store.task_turns
 def atomic_json_write(path: Path, value: Any) -> None:
     """Replace a JSON file in one step; the worker-owned tools write task.json through this name."""
     task_store.atomic_json_write(path, value)
-
-
-def sync_current_turn(task: dict[str, Any]) -> None:
-    """Keep this exchange's outcome alongside the compatible task-level result."""
-    task_store.sync_current_turn(task, utc_now())
 
 
 def new_turn(message: str) -> dict[str, Any]:
@@ -5057,8 +5064,8 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
 
 
 def remote_control_instructions(options: dict[str, Any]) -> str:
-    """Offer token-free observational reads and keep native command decisions intact."""
-    return (
+    """Offer token-free observational reads, keep native command decisions intact, and end with the built-in layer."""
+    return with_builtin_instructions(
         f"You are running in the Home Assistant add-on. {old_config_note()} "
         f"Put notes, scratch files and drafts in {CODEX_WORKDIR}, not in {CONFIG_ROOT}. "
         + (f"Owner workspace instructions: {AGENTS_PATH}. " if AGENTS_PATH.is_file() else "")
@@ -5147,18 +5154,37 @@ def old_config_note() -> str:
     )
 
 
+def with_builtin_instructions(text: str) -> str:
+    """Put BUILTIN_INSTRUCTIONS at the end of a chat's developer instructions.
+
+    Codex sends the owner's AGENTS.md as user instructions after the developer instructions. The built-in text
+    gives the owner's file priority in its first line, and coming last it sits directly before that file, so
+    "anything here" means the built-in text only, not the page's tool rules above it.
+    """
+    return text.rstrip("\n") + "\n\n" + BUILTIN_INSTRUCTIONS + "\n"
+
+
 def build_page_instructions():
-    """The page rules; the scheduling paragraph is in them only while scheduled runs are switched on."""
+    """The page rules and the built-in layer; the scheduling paragraph is in them only while scheduled runs are on."""
     paragraph = SCHEDULING_PARAGRAPH + "\n\n" if scheduling.SCHEDULED_RUNS else ""
     text = (_PAGE_INSTRUCTIONS_TEMPLATE.replace("@@SCHEDULING_PARAGRAPH@@", paragraph)
             .replace("@@WORKDIR@@", str(CODEX_WORKDIR)))
-    return text.replace("@@OLD_CONFIG_NOTE@@", old_config_note()).replace("@@CONFIG_ROOT@@", CONFIG_ROOT.as_posix())
+    text = text.replace("@@OLD_CONFIG_NOTE@@", old_config_note()).replace("@@CONFIG_ROOT@@", CONFIG_ROOT.as_posix())
+    return with_builtin_instructions(text)
 
 
 PAGE_INSTRUCTIONS = build_page_instructions()  # for callers that read it at import; the send paths call the function
 
-# Put in front of a page message on a thread that did not get PAGE_INSTRUCTIONS when it started: a thread
-# started in the ChatGPT app, or by version 0.3.2 or earlier of this app. exchange_info then returns the rules too.
+
+def rules_stamp(text: str) -> str:
+    """A short fingerprint of the page rules, kept as a task's told_rules to show which rules its thread was told."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+# Put in front of a page message on a thread whose told_rules differ from the current rules: a thread started in the
+# ChatGPT app, by an earlier version of this app, or before an update changed the rules. Codex keeps a thread's first
+# developer instructions until a compaction, so without this line an old chat runs on the old rules.
+# exchange_info then returns the rules too.
 RULES_POINTER = ("[Home Assistant page] Call the home_assistant_data exchange_info tool first. "
                  "Its rules entry holds the rules for messages from this page, and they replace older copies.")
 
@@ -5616,9 +5642,8 @@ def create_approval_session(
         thread_params["threadId"], proc = open_thread(thread_params)
     assert proc is not None
     model_field = turn_model(model)
-    # The tier goes only with a named model: execution["fast"] is the Fast default of the model the worker assumed,
-    # and a turn that names none runs on Codex's own pick, which may have another default.
-    tier_field = turn_service_tier(execution) if model_field else {}
+    # A turn that names no model and whose chat chose no Fast setting has fast None (turn_fast), so it sends no tier.
+    tier_field = turn_service_tier(execution)
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
@@ -5644,7 +5669,7 @@ def turn_model(model: str) -> dict[str, str]:
     keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
     by name (codex_default_model: the live list's default, else /status). The pick is named only when it is a model
     the worker knows: for any other model /status gives its display text, which is not a model id. Before either named
-    a known pick, the turn names none, as before, and no service tier either.
+    a known pick, the turn names none, as before, and no service tier unless the chat chose Fast on or off (turn_fast).
     """
     if model not in {"default", "gpt-5.3-codex"}:
         return {"model": model}
@@ -5839,10 +5864,12 @@ def request_task_cancellation(
 
         waited = task_waits_on_owner(task)
         completed_at = str(task.get("completed_at") or utc_now())
-        task.update(
+        task["cancellation_requested"] = True
+        task["updated_at"] = utc_now()
+        task_store.record_result(
+            task,
             {
                 "status": "cancelled",
-                "cancellation_requested": True,
                 "completed_at": completed_at,
                 "returncode": None,
                 "summary": CANCELLED_TASK_SUMMARY,
@@ -5856,10 +5883,9 @@ def request_task_cancellation(
                 "config_check": dict(EMPTY_CONFIG_CHECK),
                 "recovery_files": [],
                 "backups": [],
-                "updated_at": utc_now(),
-            }
+            },
+            task["updated_at"],
         )
-        sync_current_turn(task)
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         task_store.atomic_json_write(task_dir / "task.json", task)
@@ -5884,10 +5910,8 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
             return False
 
         task["cancellation_event_emitted"] = True
-        if returncode is not None:
-            task["returncode"] = returncode
         task["updated_at"] = utc_now()
-        sync_current_turn(task)
+        task_store.record_result(task, {} if returncode is None else {"returncode": returncode}, task["updated_at"])
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         task_store.atomic_json_write(task_dir / "task.json", task)
@@ -6066,7 +6090,9 @@ def record_background_start_failure(task_id: str, exc: Exception) -> None:
         with lock:
             task = tasks.setdefault(task_id, {"task_id": task_id})
             if not task.get("cancellation_requested"):
-                task.update(
+                task["updated_at"] = completed_at
+                task_store.record_result(
+                    task,
                     {
                         "status": "failed",
                         "completed_at": completed_at,
@@ -6082,8 +6108,8 @@ def record_background_start_failure(task_id: str, exc: Exception) -> None:
                         "config_check": dict(EMPTY_CONFIG_CHECK),
                         "recovery_files": [],
                         "backups": [],
-                        "updated_at": completed_at,
-                    }
+                    },
+                    completed_at,
                 )
         print(
             "Could not persist background task startup failure: "
@@ -6331,6 +6357,7 @@ class PreparedExchange(NamedTuple):
     before_manifest_path: Path
     options: dict[str, Any]
     permissions: str
+    rules: str
 
 
 def check_launch_policy(task_id: str) -> None:
@@ -6398,21 +6425,21 @@ def reset_final_file(final_file: Path) -> None:
 def write_exchange_message(task_id: str, prepared: PreparedExchange, prompt: str, reply: str | None,
                            session_id: str | None, backup_dir: Path | None) -> None:
     """Write the message Codex reads, and set the exchange_info that its tools return."""
-    # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
-    # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
-    # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
-    # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
-    # of this app) it is told once.
+    # A new thread gets the page rules as its developer instructions and learns its sandbox when it starts. A resumed
+    # thread is told in the message when its rules or its permissions differ from the ones it was last told (run_task
+    # records both once the turn starts); with no record (a thread from the ChatGPT app, or from an earlier version of
+    # this app) it is told once. For the rules that is a pointer in the message, and exchange_info carries them.
     permissions = prepared.permissions
     with lock:
         task = tasks.get(task_id, {})
-        has_page_instructions = bool(task.get("page_instructions"))
+        told_rules = task.get("told_rules")
         told_permissions = task.get("told_permissions")
-    point_to_rules = bool(session_id) and not has_page_instructions
+    point_to_rules = bool(session_id) and told_rules != prepared.rules
     changed_permissions = permissions if session_id and told_permissions != permissions else ""
     ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules,
                                                      permissions=permissions))
     if not session_id:
+        # Deprecated, written only so that 0.5 after a rollback still sees a page thread; this build reads told_rules.
         update_task(task_id, page_instructions=True)
     try:
         prepared.prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
@@ -6455,7 +6482,8 @@ def prepare_exchange(task_id: str, prompt: str, session_id: str | None, reply: s
     reset_final_file(final_file)
     prepare_ha_docs()
     permissions = permissions_note(task_mode_settings(task_id, options))
-    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions)
+    rules = rules_stamp(build_page_instructions())
+    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions, rules)
     write_exchange_message(task_id, prepared, prompt, reply, session_id, backup_dir)
     checkpoint(task_id)
     check_model_pin(task_id, options)
@@ -6610,10 +6638,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     task_dir, final_file = prepared.task_dir, prepared.final_file
     before_manifest_path, permissions = prepared.before_manifest_path, prepared.permissions
     # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
-    # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
-    # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
+    # Codex never read the message, so the next message must carry the rules pointer and the permissions line again.
+    # A repeated line does no harm; a lost one leaves Codex on the old rules or naming the old mode. (update_task
+    # changes nothing after a cancel.)
     if approval_session.turn_id:
-        update_task(task_id, told_permissions=permissions)
+        update_task(task_id, told_permissions=permissions, told_rules=prepared.rules)
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not approval_session.turn_id:
@@ -7524,6 +7553,8 @@ def get_agents() -> Response:
             "path": str(AGENTS_PATH),
             "exists": AGENTS_PATH.exists(),
             "content": content,
+            # Shown read-only above the editor; the editor never saves it into AGENTS.md.
+            "builtin": BUILTIN_INSTRUCTIONS,
         }
     )
 

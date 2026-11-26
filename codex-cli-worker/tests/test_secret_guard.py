@@ -5,7 +5,7 @@ dashboards and other state, and secrets.yaml holds the values that `!secret` nam
 The worker leaves both out of the full snapshot and deletes any copy of them in an
 exchange's backup folder, in every permission mode. In a sandbox both are
 readable and writable like the rest of /homeassistant, as in the Claude add-on; the
-starter AGENTS.md tells Codex when to leave them alone.
+built-in instructions (builtin_instructions.md) tell Codex to keep secrets out of chat, files and commits.
 """
 from __future__ import annotations
 

@@ -104,7 +104,9 @@ The app's own install of the integration (steps 2 to 4) needs nothing else.
 Every app option is in [docs/app-reference.md](docs/app-reference.md).
 
 Put rules for your house in the app's `AGENTS.md`, kept in its own `addon_config` folder and not in `/homeassistant`. The chat has an editor for it under **Settings** > **Workspace instructions** >
-**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. A new
+**Workspace rules**. Codex uses its defaults and your workspace instructions; the app bundles no house rules. It also sends its built-in
+instructions (folders, tools, logs, secrets and GitHub; shown above the editor, updated with the app), and your
+workspace instructions take priority over them. A new
 install that has no `AGENTS.md` gets a short starter file there once, which is yours to change or delete.
 
 ## Updating

@@ -169,21 +169,7 @@ function markdownBlocks(tokens, parent, fileLink = null) {
       markdownInline(token.tokens, node, false, fileLink);
       parent.append(node);
     } else if (token.type === "code") {
-      const block = document.createElement("div");
-      block.className = "md-code";
-      const lang = (token.lang || "").trim().split(/\s+/)[0];
-      if (lang) {
-        const label = document.createElement("div");
-        label.className = "md-lang";
-        label.textContent = lang;
-        block.append(label);
-      }
-      const pre = document.createElement("pre");
-      const code = document.createElement("code");
-      code.textContent = token.text;
-      pre.append(code);
-      block.append(pre);
-      parent.append(block);
+      parent.append(markdownCodeBlock(token));
     } else if (token.type === "blockquote") {
       const node = document.createElement("blockquote");
       markdownBlocks(token.tokens, node, fileLink);
@@ -221,6 +207,66 @@ function markdownBlocks(tokens, parent, fileLink = null) {
     // The text of a list item that has no blank lines around it.
     else if (token.tokens) markdownInline(token.tokens, parent, false, fileLink);
     else parent.append(token.text ?? token.raw);
+  }
+}
+/**
+ * A code block: a bar with the Copy button at its left and the language name,
+ * then the code. The bar sits above the code, so the button never covers the
+ * first line on a narrow screen.
+ */
+function markdownCodeBlock(token) {
+  const block = document.createElement("div");
+  block.className = "md-code";
+  const bar = document.createElement("div");
+  bar.className = "md-code-bar";
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+  code.textContent = token.text;
+  pre.append(code);
+  bar.append(markdownCopyButton(code));
+  const lang = (token.lang || "").trim().split(/\s+/)[0];
+  if (lang) {
+    const label = document.createElement("span");
+    label.className = "md-lang";
+    label.textContent = lang;
+    bar.append(label);
+  }
+  block.append(bar, pre);
+  return block;
+}
+const COPY_LABEL = "Copy";
+const COPY_RESET_MS = 2000;
+/** A button that copies the text of `code`, then shows for a moment what it did. */
+function markdownCopyButton(code) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "md-copy";
+  button.textContent = COPY_LABEL;
+  button.setAttribute("aria-label", "Copy code");
+  let reset = 0;
+  button.addEventListener("click", async () => {
+    button.textContent = (await copyCodeText(code)) ? "Copied" : "Selected, copy it";
+    clearTimeout(reset);
+    reset = setTimeout(() => { button.textContent = COPY_LABEL; }, COPY_RESET_MS);
+  });
+  return button;
+}
+/**
+ * Put the text of `code` on the clipboard and return true. Some web views, such
+ * as a phone app's, have no clipboard or refuse it; then select the text so the
+ * owner can copy it by hand, and return false.
+ */
+async function copyCodeText(code) {
+  try {
+    await navigator.clipboard.writeText(code.textContent);
+    return true;
+  } catch (_) {
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return false;
   }
 }
 // The chat is redrawn whenever it changes, so each message is parsed only once.
@@ -263,7 +309,7 @@ function renderMarkdown(text, className, fileLink = null) {
 /** Return a message without its Markdown symbols, for one-line previews. */
 function markdownPlain(text) {
   const node = renderMarkdown(text, "");
-  for (const label of node.querySelectorAll(".md-lang")) label.remove();
+  for (const label of node.querySelectorAll(".md-code-bar")) label.remove();
   // Blocks carry no spaces between them, so keep their words apart.
   for (const part of node.querySelectorAll(
     "p, li, h3, h4, h5, h6, pre, th, td, br",

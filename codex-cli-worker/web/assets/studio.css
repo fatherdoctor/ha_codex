@@ -90,6 +90,9 @@ body[data-full-access="on"] .permission-option[data-mode="full-access"] strong {
 .pairing-continue { display: block; background: var(--accent); color: var(--text-light-primary-color, #212121); text-decoration: none; border-radius: 10px; padding: 14px; margin: 16px 0; font-weight: 600; }
 .pairing-qr { display: block; background: white; padding: 12px; width: min(260px, 100%); height: auto; margin: 16px auto; }
 .pairing-code { overflow-wrap: anywhere; }
+/* The built-in layer: read-only, so muted italic text on a tinted ground, unlike the editor below it. */
+#builtin-label { color: var(--muted); font-size: calc(12px * var(--text-scale)); margin: 0 0 6px; }
+#builtin-text { margin: 0 0 16px; max-height: 30dvh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-style: italic; color: var(--muted); background: color-mix(in srgb, var(--text) 6%, var(--sidebar)); border: 1px dashed var(--line); border-radius: 10px; padding: 12px; font-size: calc(12px * var(--text-scale)); }
 #agents { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 12px; border-radius: 10px; }
 @media (max-width: 1050px) and (min-width: 701px) {
   .compose-area { padding: 12px 20px 22px; }

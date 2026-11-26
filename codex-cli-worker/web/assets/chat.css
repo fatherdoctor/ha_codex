@@ -770,8 +770,26 @@ h1 {
   background: var(--surface);
   overflow: hidden;
 }
+.md-code-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px 0;
+  user-select: none;
+}
+.md-copy {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(11px * var(--text-scale));
+  cursor: pointer;
+}
+.md-copy:hover { color: var(--text); }
 .md-lang {
-  padding: 7px 14px 0;
   color: var(--muted);
   font-size: calc(10px * var(--text-scale));
   line-height: 1.5;
@@ -2078,7 +2096,7 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 /*
  * Settings and its dialogs (Status, Remote connection, Permissions, Workspace rules) look like Home Assistant's
  * own settings pages. The page copies the look with plain HTML and CSS: Home Assistant's own components are not
- * published for add-on pages and change between releases. haTheme() in chat.js copies the theme variables used
+ * published for add-on pages and change between releases. haTheme() in chat-core.js copies the theme variables used
  * here; every use has a fallback, so the standalone preview and an older frontend still draw each part.
  */
 
@@ -2315,7 +2333,7 @@ details.disclosure > summary::-webkit-details-marker {
   mask: var(--mdi-cog) center / 18px no-repeat;
 }
 /*
- * While something needs the owner (body[data-attention], set by showAttention in chat.js),
+ * While something needs the owner (body[data-attention], set by showAttention in chat-settings.js),
  * a small dot shows at the top right of the Settings cog and of the phone's chat-list buttons:
  * yellow while something waits, red on a sign-out. The dismiss row under Settings carries the
  * same dot in front of its label. No warning symbol replaces an icon.

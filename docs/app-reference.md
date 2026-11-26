@@ -331,7 +331,7 @@ A conversation from the chat page is a Codex thread, and the ChatGPT app shows t
 
 Details that change from one message to the next are not part of the rules: the backup folder, the chat's files folder (see [Files Codex makes for you](#files-codex-makes-for-you)), the documents and images you attached, and the notes on direct API calls (the `HA_TOKEN` option), the local documentation and GitHub. Codex reads them from the `exchange_info` tool before its first command, file change or tool call in a message, and when your message can refer to a file, a document or something it cannot see in the chat, such as "Summarize this" with a document attached. The `permissions` entry of `exchange_info` names the sandbox and approval policy that the current message runs with. A message that Codex can answer from what it knows and from the chat, such as a greeting or a one-number reply, needs no tool call, so it gets its answer in one step. Codex keeps the developer instructions a thread started with, so an update of this app changes the rules of a new thread; an older thread keeps its rules until Codex compacts it.
 
-A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A message from the page on such a thread starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
+A thread that this page did not start has no page rules: a thread started in the ChatGPT app, or one started by 0.3.2 or earlier. A thread started before an update changed the rules has the old ones: Codex keeps a thread's first developer instructions until it compacts the thread. The app records which rules each chat was told (`told_rules` in its `task.json`, from 0.6). The first message from the page on a thread with no record or with older rules starts with a one-line note that tells Codex to call `exchange_info`, which then also returns the rules; once that turn has started, the next messages carry no note until the rules change again. A thread from 0.3.2 or earlier also keeps that version's instructions in its history, so it can still answer in the app with the page's JSON format. The page still reads such a JSON answer.
 
 Codex learns a thread's sandbox when the thread starts. When you change the chat's permission mode later, the next message starts with one line that gives the new sandbox and approval policy, and says that it replaces any mode named earlier in the chat. The page records what it told a thread once Codex's turn has started, so a message that fails to start gives the line again on the next one. A thread that the page has no record for (one from the ChatGPT app, or from an earlier version of this app) gets the line once. The ChatGPT app shows that line in front of your words on the first message after a change.
 
@@ -377,8 +377,7 @@ The app creates the folder at start when it is missing and never moves, empties 
 may write without a request is `/homeassistant`, `/share`, `/media` (with `/media/.agents`), `/addon_config` (the app's own
 folder, where its `AGENTS.md` is), the exchange's backup folder and the chat's files folder. Other apps keep their
 files under `/share` and `/media` too (another assistant's folder, a clone of a repository, recordings); the sandbox
-does not stop a write there in `workspace-write`, so the starter `AGENTS.md` tells Codex to ask first, and your own
-`AGENTS.md` can say more. When the folder cannot be created, when `/media` is missing, or when any part of the path is
+does not stop a write there in `workspace-write`; your own `AGENTS.md` can tell Codex to ask first. When the folder cannot be created, when `/media` is missing, or when any part of the path is
 a link, Codex works from `/homeassistant` as before and the app's log says why, naming the link. A link at `/media/.agents`
 itself does more: Codex keeps that folder read-only and cannot do so through a link, so it refuses to build its
 sandbox, and every command in Ask for approval and Approve for me fails until you remove the link. Read only still
@@ -749,18 +748,36 @@ Open **Settings > Accounts and connections > GitHub** in the app page. The card 
 
 The app web UI includes an editor for the app's `AGENTS.md` (in its own `addon_config` folder, not in `/homeassistant`) under **Settings** > **Workspace instructions** > **Workspace rules**. This file remains the source of truth for shared Codex project instructions. When the file does not exist, the task prompt does not mention it, and the page shows a setup hint above the message box until you write the file or choose **Dismiss** (the choice is kept in that browser).
 
+**Built-in instructions (0.6).** The app sends its own instructions with every chat: on the page they end the
+developer instructions of each new thread (and the rules that `exchange_info` returns to a chat told older rules), and in remote control they end
+the developer instructions of the remote Codex process. The text is `builtin_instructions.md` in the app's source: the
+folders and how `/config` maps to `/homeassistant`, the Home Assistant tools, how to read logs, the secrets rules and
+the Git and GitHub rules. It ships in the image, so an update of the app updates it, and nobody edits it. Settings >
+Workspace instructions shows it read-only, in muted italic text on a tinted ground, above the `AGENTS.md` editor; the
+editor never saves it into your file. Your `AGENTS.md` takes priority: the built-in text says so in its first line,
+it comes last in the developer instructions, and Codex reads your file after them, as its global instructions. The
+app does not copy your file into the developer instructions.
+
 **Starter instructions.** On its first start, the app writes a short starter `AGENTS.md` in the app's own folder when the home has
-none. The text is `starter_agents.md` in the app's source. It tells Codex what `/homeassistant` is and gives seven general
-rules. Four of them matter most: change the home only on the owner's word, keep secrets secret, keep the old version
-of a changed file, and check the configuration before a restart. A short section after the rules lists three safeguard
-defaults (secrets, protected places, backups) and says that they are defaults the owner can change, not locks in
-the app. Two more sections tell Codex how to keep a memory across chats (one fact per file in `/config/memory/`,
-with an index `/config/memory/MEMORY.md` it reads at the start of each chat, and never a secret) and say
-that the Codex device holds this app's own entities. The app never replaces a file that is already there,
-a link included. It writes the starter once: when you delete the file, it stays deleted while the app keeps
-its data, and an update of an app that has started before writes nothing. The rules are instructions to Codex and not a safeguard; the sandbox, the
-command check and the approval cards work the same with or without them. To get the starter on an older install,
-copy the text from `starter_agents.md` into the editor.
+none. The text is `starter_agents.md` in the app's source. It says that its rules take priority over the built-in
+instructions, tells Codex how to keep a memory across chats (one fact per file in `/homeassistant/.codex/memory/`, with
+an index `MEMORY.md` it reads at the start of each chat, never a secret, never committed), and tells Codex to rename or
+delete a chat only with the app's tools or on the chat page, never by changing files under `/data`. The app never
+replaces a file that is already there, a link included. It writes the starter once: when you delete the file, it
+stays deleted while the app keeps its data, and an update of an app that has started before writes nothing. The rules
+are instructions to Codex and not a safeguard; the sandbox, the command check and the approval cards work the same
+with or without them. To get the starter on an older install, copy the text from `starter_agents.md` into the editor.
+
+**From 0.5 to 0.6.** Most of the secrets rules and the Git and GitHub rules of the 0.5 starter now ship with the app
+as built-in instructions. Two do not: "Open secret files only when the owner asks" (rule 2), and never to stage
+personal or location data (the Git section). An `AGENTS.md` from 0.5 keeps working. You may remove its secrets and
+Git and GitHub lines and paste the Memory section of the new `starter_agents.md`; keep those two rules in your file if
+you want them. No other rule of the 0.5 starter is in the new texts either: rules 1 and 3 to 7 (change the home only
+on the owner's word, keep the old version, check before a restart, leave `.storage` to Home Assistant, one small
+change at a time, stop and ask when not sure), the safeguard defaults (ask before touching the protected places or
+changing another app's files under `/share` or `/media`), the section on this app's sensors, and "About this home".
+Keep any of them in your file if you want them. A chat from before the update gets the built-in instructions with its
+next message: the app records which rules each chat was told, and points a chat with older rules to the new ones once.
 
 **Where the file lives (0.4).** The file is `AGENTS.md` in the app's own `addon_config` folder: `/addon_configs/<app folder>/AGENTS.md` on the host and `/addon_config/AGENTS.md` inside the app. It is not in the top level of `/homeassistant`. Codex loads it as its global instructions through a link the app keeps at `$CODEX_HOME/AGENTS.md` (`/data/codex-home/AGENTS.md`), where Codex looks for global instructions ([Codex: AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)). On the first start of this version, an `AGENTS.md` that an older version left in `/homeassistant` is **moved** into the app's folder, after a backup copy at `/data/agents_before_move.md`. It is moved and not copied because Codex then worked in that folder and would have read both. If both places already hold a file, the app moves nothing, logs a line, and leaves the one in `/homeassistant` for you to merge or delete. The folder is part of the app's backup like its other data.
 
@@ -965,7 +982,7 @@ trigger:
 ```
 ````
 
-Single backticks mark inline code, such as an entity id. Headings, bold and italic text, strikethrough, bulleted and numbered lists, task lists, quotes, tables, horizontal rules, and links are formatted as well. Code blocks keep their indentation and scroll sideways when a line is too long, and so do wide tables. A single Enter stays a line break, and `<br>` breaks a line inside a table cell. The preview of each chat in the sidebar shows the answer without the symbols.
+Single backticks mark inline code, such as an entity id. Headings, bold and italic text, strikethrough, bulleted and numbered lists, task lists, quotes, tables, horizontal rules, and links are formatted as well. Code blocks keep their indentation and scroll sideways when a line is too long, and so do wide tables. Each code block has a **Copy** button at its top left that copies the code; where the clipboard is not available, as in some phone apps, it selects the code so you can copy it by hand. A single Enter stays a line break, and `<br>` breaks a line inside a table cell. The preview of each chat in the sidebar shows the answer without the symbols.
 
 Your own messages follow the same rules, so a line that starts with `#`, `-`, or `1.` becomes a heading or a list item, and text between asterisks or underscores is emphasized. Put configuration, templates, and logs in a code block to show them exactly as written.
 

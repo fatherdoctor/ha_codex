@@ -161,71 +161,43 @@ class StarterAgentsAtStartup(unittest.TestCase):
 
 
 class StarterAgentsText(unittest.TestCase):
-    """The starter is short, general, and holds the rules DOCS.md names."""
+    """The starter is the owner's layer: the memory rules and the chat rule; the app's rules are built in."""
 
     def setUp(self):
         self.text = STARTER.read_text(encoding="utf-8")
+
+    def section(self, heading):
+        return " ".join(self.text.split(f"## {heading}", 1)[1].split("\n## ", 1)[0].split())
 
     def test_it_is_small_enough_to_save_from_the_editor(self):
         self.assertLess(len(STARTER.read_bytes()), 6144)
         self.assertLess(len(STARTER.read_bytes()), server.AGENTS_MAX_BYTES)
 
-    def test_it_says_the_file_is_the_owners_to_change_or_delete(self):
-        self.assertIn("The file is yours: change it, add the rules of your home, or\ndelete it.", self.text)
-
-    def test_it_holds_the_four_general_rules(self):
-        for heading in ("Change the home only on the owner's word.", "Keep secrets secret.",
-                        "Keep the old version.", "Check before a restart."):
-            with self.subTest(rule=heading):
-                self.assertIn(heading, self.text)
-
-    def test_it_says_when_to_open_secret_files(self):
-        # The sandbox no longer hides secrets.yaml or the sign-in files, so this rule is what keeps them out of chat.
-        rule = " ".join(self.text.split("2. Keep secrets secret.", 1)[1].split("\n3. ", 1)[0].split())
-        self.assertIn("Open secret files only when the owner asks", rule)
-        self.assertIn("never paste them into chat", rule)
-
-    def test_it_says_why_storage_is_left_to_home_assistant(self):
-        # The sandbox no longer keeps .storage read-only, so this rule is what keeps Codex out of it.
-        rule = " ".join(self.text.split("5. Leave `/config/.storage` to Home Assistant.", 1)[1].split("\n6. ", 1)[0].split())
-        self.assertIn("Do not edit its files while Home Assistant runs", rule)
-        self.assertIn("writes over changed files from memory", rule)
-        self.assertIn("the API", rule)
-
-    def test_it_has_the_safeguard_defaults_and_says_they_are_not_locks(self):
-        section = self.text.split("## Safeguards: defaults the owner can change", 1)[1].split("## About this home", 1)[0]
-        self.assertIn("not locks in the app", section)
-        # Showing the Home Assistant log is daily work: the secrets line must not list logs as a thing to keep back.
-        self.assertNotRegex(section, r"(?i)logs and|, logs")
-        # The app enforces only the sandbox and the permission mode; the bracket must not claim a wider refusal.
-        self.assertNotIn("refuses git work", section)
-        # The owner, not Codex, may change the rules; Codex reads "you" as itself.
-        self.assertIn("The owner can edit or delete any of them", " ".join(section.split()))
-        self.assertNotRegex(section, r"(?im)defaults that you set|^edit or delete")
-        for word in ("secrets.yaml", ".storage", "/config/.git/hooks", "/share/HomeAssistant", "Backups:", "rule 3"):
-            with self.subTest(word=word):
-                self.assertIn(word, section)
-
-    def test_it_keeps_private_data_out_of_git_and_github(self):
-        section = self.text.split("## Git and GitHub", 1)[1].split("## About this home", 1)[0]
-        for word in ("staged", "secrets.yaml", ".storage", "`memory/`", "databases", "log files", "backups",
-                     "personal or location data", ".gitignore", "Ask the owner before the first push", "private by default"):
-            with self.subTest(word=word):
-                self.assertIn(word, section)
+    def test_it_says_its_rules_take_priority_over_the_built_in_layer(self):
+        self.assertIn("The add-on's built-in instructions cover folders, tools, logs, secrets and GitHub. "
+                      "Rules here take priority.", self.text)
 
     def test_it_tells_codex_how_to_keep_a_memory(self):
-        section = self.text.split("## Memory", 1)[1].split("\n## ", 1)[0]
-        for words in ("`/config/memory/`:", "one fact per file", "`/config/memory/MEMORY.md`",
-                      "Read the index when a chat starts",
-                      "update a file rather than add a second", "delete wrong facts", "No secrets", "never commit"):
+        section = self.section("Memory")
+        for words in ("`/homeassistant/.codex/memory/`:", "one fact per file", "an index `MEMORY.md` there",
+                      "Read the index when a chat starts", "update a file rather than add a second",
+                      "delete wrong facts", "No secrets or personal details there", "never commit `memory/`",
+                      "check the memory index"):
             with self.subTest(words=words):
-                self.assertIn(words, " ".join(section.split()))
+                self.assertIn(words, section)
 
-    def test_it_points_codex_at_the_apps_own_entities(self):
-        section = self.text.split("## This app's sensors", 1)[1].split("\n## ", 1)[0]
-        for words in ("Codex device", "sign-in", "usage limits", "Active tasks", "Last task", "permission prompts"):
-            with self.subTest(words=words):
-                self.assertIn(words, " ".join(section.split()))
+    def test_it_says_to_manage_chats_through_the_app_not_its_files(self):
+        # A chat deleted by removing its files under /data stays listed on the page.
+        section = self.section("Chats")
+        self.assertIn("only with this app's tools or on its chat page", section)
+        self.assertIn("Never delete or change files under `/data`", section)
+
+    def test_secrets_and_git_rules_are_in_the_built_in_layer_not_here(self):
+        # They ship with the app now (test_builtin_instructions.py checks their words), so an update reaches them.
+        self.assertNotIn("## Secrets", self.text)
+        self.assertNotIn("## Git and GitHub", self.text)
+        self.assertIn("## Secrets", server.BUILTIN_INSTRUCTIONS)
+        self.assertIn("## Git and GitHub", server.BUILTIN_INSTRUCTIONS)
 
     def test_it_does_not_ask_for_backup_copies_inside_the_config_folder(self):
         # The worker gives each message its own backup folder and tells Codex to leave no other copies in /config.

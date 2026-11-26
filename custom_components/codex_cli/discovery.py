@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import secrets
-from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import ClientError, ClientSession

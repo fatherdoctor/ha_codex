@@ -97,6 +97,45 @@ class TaskStoreTests(unittest.TestCase):
         self.assertNotIn("title", saved_turn)
         self.assertEqual(saved_turn["updated_at"], self.store.tasks["a"]["updated_at"])
 
+    def test_the_turn_owns_the_result_and_the_task_level_fields_copy_it(self):
+        turn = {"turn_id": "f" * 32, "message": "Hello"}
+        self.store.update("a", {"current_turn_id": turn["turn_id"], "turns": [turn], "status": "running"}, touch=True)
+        # A task-level write that bypasses the store is not the result: it never reaches the turn.
+        self.store.tasks["a"]["status"] = "stray"
+        self.store.update("a", {"summary": "Working"}, touch=True)
+        saved = self.saved("a")
+        self.assertEqual(saved["turns"][-1]["status"], "running")
+        # The copy kept for a rollback to 0.5.x, which reads only the task-level fields, and for the task index.
+        self.assertEqual((saved["summary"], self.index()["a"]["summary"]), ("Working", "Working"))
+
+    def test_a_turn_opened_with_a_result_gets_it_and_the_earlier_turn_keeps_its_own(self):
+        first, second = {"turn_id": "a" * 32, "message": "One"}, {"turn_id": "b" * 32, "message": "Two"}
+        self.store.update("a", {"current_turn_id": first["turn_id"], "turns": [first]}, touch=True)
+        self.store.update("a", {"status": "completed", "summary": "First answer"}, touch=True)
+        turns = [*self.store.tasks["a"]["turns"], second]
+        self.store.update("a", {"current_turn_id": second["turn_id"], "turns": turns, "status": "queued",
+                                "summary": ""}, touch=True)
+        saved = self.saved("a")
+        self.assertEqual([(t["status"], t["summary"]) for t in saved["turns"]],
+                         [("completed", "First answer"), ("queued", "")])
+        self.assertEqual((saved["status"], saved["summary"]), ("queued", ""))
+
+    def test_a_record_without_turns_keeps_its_result_at_task_level(self):
+        self.store.update("a", {"status": "completed", "summary": "Done"}, touch=True)
+        saved = self.saved("a")
+        self.assertEqual((saved["status"], saved["summary"]), ("completed", "Done"))
+        self.assertNotIn("turns", saved)
+
+    def test_record_result_copies_values_and_stamps_the_turn(self):
+        task = {"current_turn_id": "c" * 32, "turns": [{"turn_id": "c" * 32}]}
+        changes = {"added": ["a.yaml"], "changed": [], "deleted": []}
+        task_store.record_result(task, {"changes": changes}, "t1")
+        task["changes"]["changed"].append("c.yaml")
+        self.assertEqual(task["turns"][0]["changes"], {"added": ["a.yaml"], "changed": [], "deleted": []})
+        task_store.record_result(task, {}, "t2")
+        self.assertEqual(task["turns"][0]["updated_at"], "t2")
+        self.assertIsNone(task_store.current_turn({"current_turn_id": "d" * 32, "turns": task["turns"]}))
+
     def test_the_end_of_a_wait_is_reported_once_and_outside_the_lock(self):
         self.store.update("a", {"status": "waiting_for_input"}, touch=True)
         self.store.update("a", {"status": "waiting_for_input", "summary": "Still asking"}, touch=True)

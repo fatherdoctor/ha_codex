@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
+from chat_scripts import CHAT_SCRIPTS
 from test_server import server
 
 
@@ -582,10 +583,22 @@ class ConversationTests(unittest.TestCase):
         self.assertIn(b'assets/chat.js', response.data)
         # The Markdown parser is bundled, so the chat never loads a script from another server.
         scripts = re.findall(rb'<script src="([^"]+)"', response.data)
-        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js", b"assets/update_banner.js"])
-        for name in ("text-size.js", "chat.js", "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
+        self.assertEqual(scripts, [b"assets/text-size.js", b"assets/vendor/marked.umd.js", b"assets/markdown.js", b"assets/chat-core.js", b"assets/chat-settings.js", b"assets/chat.js", b"assets/studio.js", b"assets/schedules.js", b"assets/full_access.js", b"assets/update_banner.js"])
+        for name in ("text-size.js", *CHAT_SCRIPTS, "chat.css", "studio.js", "studio.css", "markdown.js", "vendor/marked.umd.js", "vendor/marked.LICENSE.md"):
             with self.client.get("/assets/" + name) as asset:
                 self.assertEqual(asset.status_code, 200)
+
+    def test_chat_scripts_load_in_order_before_the_page_extensions(self):
+        """The cut chat script shares one scope: each file may use only earlier files while it loads (CX-RF-JS)."""
+        response = self.client.get("/", headers={"X-Ingress-Path": "/api/hassio_ingress/test"}, environ_overrides={"REMOTE_ADDR": server.INGRESS_PROXY_IP})
+        scripts = [name.decode() for name in re.findall(rb'<script src="assets/([^"]+)" defer>', response.data)]
+        first = scripts.index(CHAT_SCRIPTS[0])
+        self.assertEqual(scripts[first:first + len(CHAT_SCRIPTS)], list(CHAT_SCRIPTS))
+        self.assertLess(first + len(CHAT_SCRIPTS) - 1, scripts.index("studio.js"))
+        for name in CHAT_SCRIPTS:
+            with self.client.get("/assets/" + name) as asset:
+                self.assertEqual(asset.status_code, 200)
+                self.assertTrue(asset.data.startswith(b'"use strict";\n'), name)
 
 
 if __name__ == "__main__":
