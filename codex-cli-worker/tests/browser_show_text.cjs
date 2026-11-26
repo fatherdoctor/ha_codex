@@ -7,6 +7,7 @@
 // 3. A Markdown link in an interim message renders as a link.
 // 4. A check that could not confirm reads "not confirmed" (never "failed") and is not red; the rows and the
 //    closed line use the same words (CX-CHECKS-TONE).
+// 5. A mix of every status: each row label, and both lines give the failed and the not confirmed counts.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
 
@@ -60,6 +61,22 @@ const base = 'http://127.0.0.1:9137/preview/';
       await page.getByText('Not confirmed · entity', {exact: true}).waitFor();
       assert.match(await page.locator('.verification > summary').textContent(), /· 1 not confirmed$/, `${label}: closed line`);
       assert.equal(await page.locator('.verification > summary.has-failed').count(), 0, `${label}: closed line is not red`);
+      // Every status at once, built by the page's own functions: row labels and both count lines.
+      const mixed = await page.evaluate(() => {
+        const checks = ['passed', 'observed', 'issues', 'unavailable', 'failed', 'unavailable'].map(
+          (status, n) => ({operation: 'entity', status, entity_id: `sensor.n${n}`}));
+        const block = renderVerification({verification: checks});
+        const counts = checkCounts(checks);
+        return {rows: [...block.querySelectorAll('.verification-result > summary')].map(row => row.textContent),
+                closed: block.querySelector(':scope > summary').textContent,
+                under: failedChecksLine(counts, () => {}).textContent,
+                red: block.querySelector(':scope > summary').classList.contains('has-failed')};
+      });
+      assert.deepEqual(mixed.rows, ['Passed · sensor.n0', 'Readback · sensor.n1', 'Not confirmed · sensor.n2',
+        'Not confirmed · sensor.n3', 'Failed · sensor.n4', 'Not confirmed · sensor.n5'], `${label}: row labels`);
+      assert.match(mixed.closed, /· 1 failed, 3 not confirmed$/, `${label}: closed line counts both`);
+      assert.equal(mixed.under, '1 check failed, 3 not confirmed', `${label}: line under the answer counts both`);
+      assert.equal(mixed.red, true, `${label}: red when one failed`);
       assert.deepEqual(errors, [], `${label}: no page errors`);
       await context.close();
     }

@@ -1588,19 +1588,23 @@ function renderWorked(turn, checks, taskId) {
   };
   return block;
 }
+/** Say "1 check failed", "2 not confirmed" or both; "check" appears once, on the first count. */
+function checkLineText({failed, unconfirmed}) {
+  const first = failed || unconfirmed;
+  const noun = first === 1 ? "check" : "checks";
+  const parts = [];
+  if (failed) parts.push(`${failed} ${noun} failed`);
+  if (unconfirmed) parts.push(failed ? `${unconfirmed} not confirmed` : `${unconfirmed} ${noun} not confirmed`);
+  return parts.join(", ");
+}
 /**
- * Build the line that stays under an answer when a check failed, so the owner
+ * Build the line that stays under an answer when a check failed or went unconfirmed, so the owner
  * sees an accident without a tap. A click opens the checks.
  */
 function failedChecksLine(counts, openChecks) {
   const line = textNode("button", "", counts.failed ? "check-failed-line" : "check-failed-line is-unconfirmed");
   line.type = "button";
-  const count = counts.failed || counts.unconfirmed;
-  const word = counts.failed ? "failed" : "not confirmed";
-  line.append(
-    textNode("span", `${count} ${count === 1 ? "check" : "checks"} ${word}`),
-    textNode("span", "", "activity-chevron"),
-  );
+  line.append(textNode("span", checkLineText(counts)), textNode("span", "", "activity-chevron"));
   line.onclick = openChecks;
   return line;
 }
