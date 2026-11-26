@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+from chat_scripts import chat_source
 from test_server import server
 
 WEB = Path(__file__).resolve().parents[1] / "web"
@@ -85,7 +86,7 @@ class SettingsPage(unittest.TestCase):
 
     def setUp(self):
         self.html = (WEB / "index.html").read_text()
-        self.chat = (WEB / "assets" / "chat.js").read_text()
+        self.chat = chat_source()
         self.studio = (WEB / "assets" / "studio.js").read_text()
 
     def test_moved_and_empty_parts_are_gone(self):
@@ -126,7 +127,7 @@ class SettingsAccordion(unittest.TestCase):
 
     def setUp(self):
         self.html = (WEB / "index.html").read_text()
-        self.chat = (WEB / "assets" / "chat.js").read_text()
+        self.chat = chat_source()
         self.settings = self.html.split('<dialog id="settings">', 1)[1].split("</dialog>", 1)[0]
 
     def test_no_browser_permissions_and_no_advanced_section(self):

@@ -18,12 +18,12 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from chat_scripts import chat_source
 from test_server import server
 import scheduling
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs" / "app-reference.md"
-CHAT_JS = ROOT / "codex-cli-worker" / "web" / "assets" / "chat.js"
 API_PATH = ROOT / "custom_components" / "codex_cli" / "api.py"
 
 PAGE, APP, SERVICE = "Chat page", "ChatGPT app", "codex_cli.start_task"
@@ -236,7 +236,7 @@ class WaysInTests(unittest.TestCase):
         session.request.return_value = context
         asyncio.run(api.CodexCliApiClient(session, "http://worker", "token").start_task("Turn on a light"))
         self.assertEqual(session.request.call_args.args, ("POST", "http://worker/tasks"))
-        self.assertRegex(CHAT_JS.read_text(encoding="utf-8"), r':\s*"tasks"')
+        self.assertRegex(chat_source(), r':\s*"tasks"')
         for request, row in WAYS_IN.items():
             with self.subTest(request=request):
                 self.assertEqual(row[SERVICE], row[PAGE])

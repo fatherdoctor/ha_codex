@@ -9,6 +9,22 @@
   ("1 check failed, 2 not confirmed"). Readbacks of
   read-only commands stay in the list as **Readback**: they are the evidence that a read happened.
 
+- **Built-in instructions.** The app now sends its own instructions with every chat, on the page and in remote
+  control: the folders, the Home Assistant tools, how to read logs, and the rules for secrets and for Git and GitHub.
+  An update of the app updates them. **Settings** > **Workspace instructions** shows them read-only above the
+  `AGENTS.md` editor. Your `AGENTS.md` takes priority over them.
+- **A shorter starter `AGENTS.md`.** A new install gets only the memory rules (in `/homeassistant/.codex/memory/`)
+  and a rule to rename or delete chats only with the app's tools or page. An existing `AGENTS.md` is never changed.
+  If yours came from an earlier starter, you may remove its secrets and Git and GitHub lines, which now ship with the
+  app, and paste the Memory section from `starter_agents.md`. Two of those lines do not ship with the app: "Open
+  secret files only when the owner asks" and never to stage personal or location data; keep them if you want them.
+  The earlier starter's other rules are gone from the new one too (the list is in the app reference, "From 0.5 to
+  0.6"); keep them in your file if you want them. A chat from before the update gets the built-in instructions with
+  its next message.
+
+- **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
+  the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
+  selects the code instead, so you can copy it by hand.
 - **Settings > Scheduled runs** shows the name of each schedule's chat as a link. The link closes Settings and opens
   that chat. A schedule of no chat says that each run starts a new chat; a schedule whose chat is gone says that its
   next run starts a new one.
@@ -33,8 +49,9 @@
   Codex then runs the model on its Fast service tier (about twice the speed; it uses more of your plan). The chip
   shows a small bolt while Fast is on. A chat that never chose follows the model's own default from the Codex model
   list, and each turn that names its model tells Codex the tier, so a choice never carries over by mistake. A turn
-  that does not yet know which model Codex picks sends no tier and leaves the choice to Codex. The button is dimmed
-  for a model without Fast.
+  that names no model (Codex's pick is not known yet, or is a model the app does not know) sends no tier for a chat
+  that chose nothing, and leaves the choice to Codex; a chat that turned Fast on or off keeps its choice. The button
+  is dimmed for a model without Fast.
 - A one-time wakeup that Codex proposes (a schedule with a single time) is now on when Codex saves it. It runs one
   time, as the next message in the chat it came from, and that run still asks for permission like any other. A
   repeating proposal still waits for an administrator's approval. A wakeup counts against the 100 approved
@@ -77,9 +94,85 @@
 - The chat page's repeating checks (the chat list, the steps of a working chat, the quota, the two sign-ins, remote
   control and the code countdowns) now run through one scheduler, `poll()`, and the buttons that wait for the worker
   share one helper, `busyAction()`. Each check keeps its timing, and nothing looks different.
+- The chat page's script starts its cut into smaller files. `chat-core.js` holds what every part of the page uses
+  (the element helper, the state, the requests to the worker, `poll()`, `busyAction()`, the icons and the theme), and
+  `chat-settings.js` holds the Settings window and the account lines. The rest stays in `chat.js` for now. The code
+  moved without a change, and nothing looks different.
 - The GitHub card explains its repository count: Codex reaches only the repositories that the GitHub App is installed
   on. A new **Add repositories** link under the list opens the App's Configure page on GitHub, where you add more. The
   link comes from GitHub's answer for the installation and shows only for an App sign-in, not for a token.
+- Integration clean-up, with no change in behavior. Each Codex action now has its own function at the top level of
+  the integration, and one table lists every action with its data schema. The fallback for Home Assistant versions
+  that had no action responses is removed, because the oldest supported version has them. Imports are in Home
+  Assistant's order, and a `raise` of an HTTP error with no arguments has no empty parentheses.
+
+## 0.5.1 (unreleased)
+
+- **Memory note.** The starter instructions now tell Codex to keep personal details, not only secrets, out of its
+  memory files: PINs, tokens, passwords, phone numbers and addresses. They also name the memory folder by its full
+  path, `/config/memory/`, rather than `memory/` in the working folder, so the memory stays in the backup and in the
+  same place when the working folder changes. An install that already has its instructions file keeps its text.
+- **Codex works from `/media/.agents/codex`.** Codex's working folder is now `/media/.agents/codex` instead of
+  `/config`, so its notes, scratch files and drafts no longer land in Home Assistant's configuration, and the
+  automatic backup leaves them out unless you include the media folder in your backup settings. The app now maps
+  Home Assistant's `/media` folder read-write, and `/media` is a writable place in `workspace-write` beside
+  `/config` and `/share`, the same `/media` access the Claude add-on has. `/media/.agents` is a writable place of its
+  own, because Codex's sandbox otherwise keeps a folder named `.agents` read-only. The move itself changes
+  no hidden file of the sandbox and no approval card. The app creates the folder at start when it is
+  missing and never moves or empties it; it does not create `/media`. When the folder cannot be created, when `/media` is missing, or when any
+  part of its path is a link, Codex works from `/config` as before and the log says why, naming the link. A link at
+  `/media/.agents` itself also stops Codex from building its sandbox, so commands fail in Ask for approval and Approve
+  for me until you remove the link; Read only still works, and the log line says so. An `AGENTS.md` that you put
+  in the working folder is read as the working folder's instructions, after the app's own `AGENTS.md`. The starter
+  `AGENTS.md` of a new install says to ask before changing files in other apps' folders under `/share` and `/media`.
+  The remote connection for the ChatGPT app starts its Codex in the same working folder. A chat from the ChatGPT app may write
+  `/config` without a request, as in 0.4, and may now also write `/share` and `/media` without a request, the same
+  as a chat on the page. The `github_git` tool and the **Link** form
+  under **Settings** > **GitHub** now refuse a relative path such as `.` and ask for the full path, so a path meant
+  for the working folder cannot name the configuration repository in `/config`.
+- **Secret files are no longer hidden in the sandbox.** Codex can now read `secrets.yaml` and Home Assistant's
+  sign-in files `.storage/auth` and `.storage/auth_provider.homeassistant`, and change them in `workspace-write`
+  without a permission card, like any other file in `/config`. The Claude add-on works the same way. Before, a read
+  saw an empty file, and a change needed a card. Rule 2 of the starter `AGENTS.md` now says to open secret files only
+  when you ask and never to paste them into the chat. An `AGENTS.md` you already have is not changed. Whatever Codex
+  reads goes into the chat and to the model provider. If you want these files kept back, say so in your `AGENTS.md`.
+  The app's own private files stay hidden: its options, API token, schedule database, GitHub sign-in and the
+  container environment that holds the Supervisor token.
+- **`.storage` is no longer read-only in the sandbox.** In 0.5.0 a change to a file under `.storage` asked you on a
+  permission card in Ask for approval. Now the sandbox keeps `.storage` writable like the rest of `/config`, as the
+  Claude add-on does, and the change runs with no card. The sign-in files under `.storage` are no longer hidden
+  either (see the entry above). Rule 5 of the starter `AGENTS.md` now says not to edit `.storage` files while Home
+  Assistant runs, because Home Assistant writes over a changed file from memory, and to use the API or the settings
+  pages. An `AGENTS.md` you already have is not changed; copy the rule from `starter_agents.md` if you want it.
+- **Settings polish from a box test.** The Settings scrollbar keeps its space, so text no longer reflows when a part
+  opens. The Ask for approval and Read only texts say what each mode asks. The ChatGPT account part shows a line about
+  Codex access only when you must sign in, and no longer lists which plans include Codex. The GitHub buttons are
+  **Sign in** and **Sign out**; **Read test** and **Check now** are gone (the app still checks every hour). A schedule
+  no longer has **Review prompt** (**Edit** shows the prompt). The workspace rules window is named **Workspace rules
+  (Codex AGENTS.md)** and has **Cancel**. Thinking lines before an answer have more space between them. While Codex
+  works, the four rows of its running reply (the steps line, the Thinking line, the progress text and the
+  **Working** line) have clear space between them; a finished reply keeps its layout.
+- **Codex changes the app's `AGENTS.md` without a card.** `/addon_config`, the app's own folder that holds its
+  `AGENTS.md`, is now a writable place in `workspace-write` beside `/config`, `/share` and `/media`, on the chat page
+  and over the remote connection. When you ask a chat to change your workspace instructions, Codex writes the file
+  without an approval card, as the Claude Code add-on writes its own folder and as the **Settings** editor already
+  did. Before, each such write showed a card. In Read only mode a change still asks first.
+- **Actions that answer with data now return it.** Codex's Home Assistant action tool can now run an action that
+  only answers with data, for example `calendar.get_events` or `weather.get_forecasts`. Before, Home Assistant
+  refused the call, because the tool did not ask for the answer, and Codex got only the error. Now the worker sends
+  the same call once more with `?return_response`; Home Assistant refused it before the action ran, so the action
+  runs once. Codex gets the data, cut at 20,000 bytes with a note when it is larger. Every other call is sent once,
+  as before.
+  Codex is also told to use this tool, not the bundled `home_assistant_mcp` server's `call_service_tool`, for
+  `calendar.get_events`, `weather.get_forecasts` and `todo.get_items`: the bundled tool cannot return their data, and
+  in a lab test Codex chose it and answered a calendar question from the entity state alone.
+- **Codex no longer calls Home Assistant's API by itself.** When a tool could not do a task, Codex could write its
+  own script to Home Assistant's address without a token. Home Assistant counts each such call as a failed login
+  and, after a few, bans the app's address. The instructions now tell Codex never to call Home Assistant's REST or
+  WebSocket API itself, with or without a token, but to use the Home Assistant tools, and to say so and stop when
+  they cannot do it. The one exception is the API call that the **Home Assistant access token** option allows.
+  Codex now gets `HA_URL`, Home Assistant's address, only when that option is set; before, it got the address
+  without the token too.
 
 ## 0.5.0 (draft)
 

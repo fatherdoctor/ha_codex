@@ -770,8 +770,26 @@ h1 {
   background: var(--surface);
   overflow: hidden;
 }
+.md-code-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px 0;
+  user-select: none;
+}
+.md-copy {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: calc(11px * var(--text-scale));
+  cursor: pointer;
+}
+.md-copy:hover { color: var(--text); }
 .md-lang {
-  padding: 7px 14px 0;
   color: var(--muted);
   font-size: calc(10px * var(--text-scale));
   line-height: 1.5;
@@ -1061,6 +1079,11 @@ h1 {
 .step-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* Thinking lines get more room between them than the other steps, so each one reads on its own. */
+.step-reasoning {
+  padding-block: 9px;
+  line-height: 1.6;
 }
 .step-reasoning .step-text {
   font-style: italic;
@@ -2074,7 +2097,7 @@ dialog :is(h3, h4):has(> .settings-toggle) {
 /*
  * Settings and its dialogs (Status, Remote connection, Permissions, Workspace rules) look like Home Assistant's
  * own settings pages. The page copies the look with plain HTML and CSS: Home Assistant's own components are not
- * published for add-on pages and change between releases. haTheme() in chat.js copies the theme variables used
+ * published for add-on pages and change between releases. haTheme() in chat-core.js copies the theme variables used
  * here; every use has a fallback, so the standalone preview and an older frontend still draw each part.
  */
 
@@ -2311,7 +2334,7 @@ details.disclosure > summary::-webkit-details-marker {
   mask: var(--mdi-cog) center / 18px no-repeat;
 }
 /*
- * While something needs the owner (body[data-attention], set by showAttention in chat.js),
+ * While something needs the owner (body[data-attention], set by showAttention in chat-settings.js),
  * a small dot shows at the top right of the Settings cog and of the phone's chat-list buttons:
  * yellow while something waits, red on a sign-out. The dismiss row under Settings carries the
  * same dot in front of its label. No warning symbol replaces an icon.
@@ -2853,6 +2876,21 @@ a.ha-nav-row:focus-visible {
 /* Each one is a block of its own, one paragraph gap (as in .markdown) from the next one and from the answer. */
 .activity-text > .message {
   margin-bottom: 12px;
+}
+/* While a turn runs, its four rows (the steps line, the Thinking line, the progress text and the "Working" footer)
+   get clear vertical room, so they do not read as one dense block; a finished exchange keeps its layout. */
+.activity.running .activity-toggle {
+  padding-block: 8px;
+}
+.activity.running .activity-thinking {
+  padding-block: 4px 10px;
+  line-height: 1.6;
+}
+.activity.running ~ .activity-text > .message {
+  margin-block: 6px 16px;
+}
+.activity.running ~ .answer .turn-meta {
+  margin-top: 22px;
 }
 /* CX-04-PHONE-LIST: at phone width the rows are 48 px (--fb2-row-height) and the menu button 44 px, and the selected chat shows its menu button in place of its date. */
 @media (max-width: 700px) {

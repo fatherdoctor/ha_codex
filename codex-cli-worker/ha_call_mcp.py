@@ -18,13 +18,16 @@ TOOL = {
     "name": "call",
     "title": "Home Assistant action",
     "description": (
-        "Send one Home Assistant action (a service call) that changes the house, for example light.turn_off, "
-        "automation.reload or homeassistant.restart. Codex asks the person before each call. "
+        "Send one Home Assistant action (a service call): one that changes the house, for example light.turn_off, "
+        "automation.reload or homeassistant.restart, or one that answers with data, for example calendar.get_events, "
+        "weather.get_forecasts or todo.get_items. Codex asks the person before each call. "
         "Put entity_id, device_id, area_id, floor_id or label_id in target, and the other fields in data. "
         "For a device the person named, give name (their words) in place of target: the action is sent only "
         "when exactly one entity of the service's domain fits, else the answer lists the candidates. "
         "When target is only entity ids, the answer reads back the new state of the first 5 of them; "
-        "for other targets, or more entities, read the state with a read tool."
+        "for other targets, or more entities, read the state with a read tool. "
+        "An action that answers with data returns it in response. Use this tool for those actions, not "
+        "home_assistant_mcp's call_service_tool, which cannot return their data."
     ),
     "inputSchema": {
         "type": "object", "additionalProperties": False,

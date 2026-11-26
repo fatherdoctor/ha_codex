@@ -433,13 +433,24 @@ class LiveExchangeTests(unittest.TestCase):
         self.assertNotIn("model", self.spawned[0].methods("turn/start")[0]["params"])
 
     def test_the_default_names_no_service_tier_before_the_cli_named_its_pick(self):
-        # fast=False is the Fast default of the model the worker assumed (the built-in default); Codex runs its own
-        # pick, which may run on Fast by default, so the turn must not name the standard tier.
+        # A chat that chose nothing resolves to fast None here (turn_fast): Codex runs its own pick, which may run on
+        # Fast by default, so the turn must not name the standard tier.
         with patch.dict(server.usage_state, {"_default_model": ""}):
-            self.assertEqual(self.message(model="default", fast=False)["status"], "completed")
+            self.assertEqual(self.message(model="default")["status"], "completed")
         turn = self.spawned[0].methods("turn/start")[0]["params"]
         self.assertNotIn("model", turn)
         self.assertNotIn("serviceTier", turn)
+
+    def test_the_owners_fast_choice_reaches_a_turn_that_names_no_model(self):
+        # The owner pressed the lightning button: the choice holds even before Codex named its pick.
+        with patch.dict(server.usage_state, {"_default_model": ""}):
+            session_id = self.message(model="default", fast=True)["session_id"]
+            self.message(session_id, model="default", fast=False)
+        turns = [turn["params"] for turn in self.spawned[0].methods("turn/start")]
+        self.assertNotIn("model", turns[0])
+        self.assertEqual(turns[0]["serviceTier"], "priority")
+        self.assertIn("serviceTier", turns[1])
+        self.assertIsNone(turns[1]["serviceTier"])
 
     def test_the_default_names_no_model_when_the_worker_does_not_know_the_cli_pick(self):
         # /status gives a display name, not a model id, for a model that neither model list has.

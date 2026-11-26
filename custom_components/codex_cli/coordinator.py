@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timedelta
+import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -47,7 +47,7 @@ GITHUB_STATE_WORDS = {
 def github_repair_key(state: str, kind: str) -> str:
     """Return the Repair's translation key: what still works and the next step differ by state and sign-in kind.
 
-    Connect again on the page starts a GitHub App sign-in, so a token connection is sent to the token form.
+    Sign in on the page starts a GitHub App sign-in, so a token connection is sent to the token form.
     """
     if state == "near_expiry":
         return "github_access_near_expiry_token" if kind == "token" else "github_access_near_expiry"
