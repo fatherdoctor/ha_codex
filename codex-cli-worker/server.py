@@ -53,6 +53,7 @@ from ha_call import HomeAssistantCall, RelayCall
 import ha_data_mcp
 import hass_mcp
 import remote_control
+import media_files
 import task_store
 import tool_threads
 import update_status
@@ -106,8 +107,9 @@ TASK_WRITABLE_ROOTS = (
 DATA_ROOT = Path("/data")
 # Files a person attaches to a message live in their own folder in the app's data folder, and the
 # backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each
-# pattern from the right of the full path, so the folder name must be one no other folder has:
-# generated images live in /data/codex_tasks/<chat>/turns/<turn>/attachments and stay in the backup.
+# pattern from the right of the full path, so the folder name must be one no other folder has: a generated
+# image that cannot go to Codex's working folder in /media (media_files.py) lives in
+# /data/codex_tasks/<chat>/turns/<turn>/attachments and stays in the backup.
 ATTACHMENTS_ROOT = DATA_ROOT / "chat_uploads"
 ATTACHMENT_KEEP_DAYS = 7
 ATTACHMENT_CLEANUP_INTERVAL_SECONDS = 86400
@@ -2203,7 +2205,18 @@ def attachment_base(task_id: str, attachment: dict[str, Any]) -> Path:
     """Return the folder an attachment record's relative path starts from."""
     if attachment.get("store") == "data":
         return ATTACHMENTS_ROOT / task_id
+    if attachment.get("store") == "media":
+        return media_files.files_root(CODEX_WORKDIR)
     return get_task_dir(task_id)
+
+
+def attachment_store(task_id: str, target: Path) -> str:
+    """The store name a record of the stored file `target` carries: "data", "media", or "" for the chat's folder."""
+    if target.is_relative_to(ATTACHMENTS_ROOT / task_id):
+        return "data"
+    if target.is_relative_to(media_files.files_root(CODEX_WORKDIR)):
+        return "media"
+    return ""
 
 
 # Live activity: the steps Codex reports for the running exchange. Kept in
@@ -2709,11 +2722,7 @@ def _write_attachment_file(
         return None
     mime_type, suffix = sniffed
     attachment_id = uuid.uuid4().hex
-    if uploaded and turn_id:
-        target_dir = upload_dir(task_id, turn_id)
-    else:
-        run_dir = get_task_dir(task_id) / "turns" / turn_id if turn_id else get_run_dir(task_id)
-        target_dir = run_dir / "attachments"
+    target_dir = upload_dir(task_id, turn_id) if uploaded and turn_id else generated_attachment_dir(task_id, turn_id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"{attachment_id}{suffix}"
     try:
@@ -2734,11 +2743,26 @@ def _write_attachment_file(
     return attachment_id, target, mime_type
 
 
+def generated_attachment_dir(task_id: str, turn_id: str | None) -> Path:
+    """The folder a generated image goes to: the chat's dated folder in /media, else the exchange's folder in /data.
+
+    /media is used only while Codex works from CODEX_WORKDIR; media_files.chat_folder refuses a link in the path.
+    """
+    if codex_workdir() == str(CODEX_WORKDIR):
+        folder = media_files.chat_folder(CODEX_WORKDIR, task_id, datetime.now().astimezone().date())
+        if folder is not None:
+            return folder
+        folder = media_files.files_root(CODEX_WORKDIR)
+        print(f"Cannot use {folder}; the image of chat {task_id} stays in /data.", flush=True)
+    run_dir = get_task_dir(task_id) / "turns" / turn_id if turn_id else get_run_dir(task_id)
+    return run_dir / "attachments"
+
+
 def attachment_record(
     task_id: str, attachment_id: str, target: Path, mime_type: str, *, name: str, origin: str, **extra: Any,
 ) -> dict[str, Any]:
     """Describe a stored image so the UI, API and result event can reference it."""
-    stored_in_data = target.is_relative_to(ATTACHMENTS_ROOT)
+    store = attachment_store(task_id, target)
     return {
         "attachment_id": attachment_id,
         "kind": "image",
@@ -2749,8 +2773,8 @@ def attachment_record(
         "sha256": file_hash(target),
         "created_at": utc_now(),
         **extra,
-        **({"store": "data"} if stored_in_data else {}),
-        "path": target.relative_to(ATTACHMENTS_ROOT / task_id if stored_in_data else get_task_dir(task_id)).as_posix(),
+        **({"store": store} if store else {}),
+        "path": target.relative_to(attachment_base(task_id, {"store": store})).as_posix(),
         "url": f"/tasks/{task_id}/attachments/{attachment_id}",
     }
 
@@ -2758,7 +2782,7 @@ def attachment_record(
 def store_attachment(
     task_id: str, source: Path | bytes | None, item: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Copy a generated image into this exchange's attachment directory."""
+    """Copy a generated image into its folder (generated_attachment_dir) and return its record."""
     if source is None:
         return None
     stored = _write_attachment_file(task_id, source)

@@ -57,6 +57,8 @@ class AttachmentTests(unittest.TestCase):
         self.stack.enter_context(patch.object(server, "ATTACHMENTS_ROOT", self.root / "chat_uploads"))
         self.stack.enter_context(patch.object(server, "CODEX_HOME", self.root / "codex"))
         self.stack.enter_context(patch.object(server, "CONFIG_ROOT", self.root / "config"))
+        # No working folder in /media unless a test makes one: generated images then stay in /data.
+        self.stack.enter_context(patch.object(server, "CODEX_WORKDIR", self.root / "media" / ".agents" / "codex"))
         # Listing chats reads the schedule store under DATA_ROOT; keep it off the real /data.
         self.stack.enter_context(patch.object(server, "DATA_ROOT", self.root / "data"))
         self.stack.enter_context(patch.object(server, "api_token", return_value="test-token"))
@@ -177,6 +179,67 @@ class AttachmentTests(unittest.TestCase):
         self.assertIn("not the recorded image", altered.json["error"])
         stored.write_bytes(png)
         self.assertEqual(self.client.get(attachment["url"], headers=self.headers).status_code, 200)
+
+    def test_generated_image_goes_to_the_dated_chat_folder_in_media(self):
+        """With a working folder in /media the image is stored there, by date and chat, and served from there."""
+        server.CODEX_WORKDIR.mkdir(parents=True)
+        task_id = self.create()
+        png = self.generate_first_image(task_id)
+        attachment = server.tasks[task_id]["attachments"][0]
+        day = server.datetime.now().astimezone().date().isoformat()
+        self.assertEqual(attachment["store"], "media")
+        self.assertEqual(attachment["path"], f"{day}/{task_id}/{attachment['attachment_id']}.png")
+        stored = server.CODEX_WORKDIR / "files" / attachment["path"]
+        self.assertEqual(stored.read_bytes(), png)
+        self.assertFalse((server.get_task_dir(task_id) / "turns").exists()
+                         and any((server.get_task_dir(task_id) / "turns").rglob("*.png")))
+        response = self.client.get(attachment["url"], headers=self.headers)
+        self.assertEqual((response.status_code, response.data), (200, png))
+        server.tasks.clear()
+        server.load_task_index()
+        self.assertEqual(self.client.get(attachment["url"], headers=self.headers).status_code, 200)
+        # The owner may remove the file from /media; the page then says it is missing.
+        stored.unlink()
+        missing = self.client.get(attachment["url"], headers=self.headers)
+        self.assertEqual(missing.status_code, 404)
+        self.assertIn("missing", missing.json["error"])
+
+    def test_a_link_in_the_media_path_keeps_the_image_in_data(self):
+        """A link below the working folder is never followed: the image stays in the chat's /data folder."""
+        server.CODEX_WORKDIR.mkdir(parents=True)
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (server.CODEX_WORKDIR / "files").symlink_to(elsewhere, target_is_directory=True)
+        task_id = self.create()
+        png = self.generate_first_image(task_id)
+        attachment = server.tasks[task_id]["attachments"][0]
+        self.assertNotIn("store", attachment)
+        self.assertTrue(attachment["path"].startswith("turns/"))
+        self.assertEqual((server.get_task_dir(task_id) / attachment["path"]).read_bytes(), png)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+        self.assertEqual(self.client.get(attachment["url"], headers=self.headers).status_code, 200)
+
+    def test_a_working_folder_reached_through_a_link_keeps_the_image_in_data(self):
+        """When Codex works from CONFIG_ROOT (its folder in /media is a link), nothing is written in /media."""
+        target = self.root / "real-codex"
+        target.mkdir()
+        server.CODEX_WORKDIR.parent.mkdir(parents=True)
+        server.CODEX_WORKDIR.symlink_to(target, target_is_directory=True)
+        task_id = self.create()
+        self.generate_first_image(task_id)
+        attachment = server.tasks[task_id]["attachments"][0]
+        self.assertNotIn("store", attachment)
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_uploads_stay_in_data_when_media_is_there(self):
+        """Only generated images move to /media; a person's uploads keep their own folder and 7-day cleanup."""
+        server.CODEX_WORKDIR.mkdir(parents=True)
+        uploads = [self.upload("a.png", png_bytes())]
+        response = self.client.post("/tasks", json={"prompt": "Look", "attachments": uploads}, headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.json)
+        upload = server.tasks[response.json["task_id"]]["turns"][0]["prompt_attachments"][0]
+        self.assertEqual(upload["store"], "data")
+        self.assertFalse((server.CODEX_WORKDIR / "files").exists())
 
     def test_oversized_stored_file_is_not_served(self):
         """A stored file above the size limit is refused even when its hash matches."""
