@@ -42,8 +42,9 @@
   Codex then runs the model on its Fast service tier (about twice the speed; it uses more of your plan). The chip
   shows a small bolt while Fast is on. A chat that never chose follows the model's own default from the Codex model
   list, and each turn that names its model tells Codex the tier, so a choice never carries over by mistake. A turn
-  that does not yet know which model Codex picks sends no tier and leaves the choice to Codex. The button is dimmed
-  for a model without Fast.
+  that names no model (Codex's pick is not known yet, or is a model the app does not know) sends no tier for a chat
+  that chose nothing, and leaves the choice to Codex; a chat that turned Fast on or off keeps its choice. The button
+  is dimmed for a model without Fast.
 - A one-time wakeup that Codex proposes (a schedule with a single time) is now on when Codex saves it. It runs one
   time, as the next message in the chat it came from, and that run still asks for permission like any other. A
   repeating proposal still waits for an administrator's approval. A wakeup counts against the 100 approved

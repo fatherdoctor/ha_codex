@@ -853,7 +853,16 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         effort = "medium"
     if effort is None:
         effort = default_effort(options, model, efforts)
-    return {"model": model, "reasoning_effort": effort, "fast": run_fast(settings.get("fast"), model_fast(named))}
+    return {"model": model, "reasoning_effort": effort, "fast": turn_fast(settings.get("fast"), model, named)}
+
+
+def turn_fast(choice: bool | None, model: str, named: str) -> bool | None:
+    """Return the Fast setting of a turn. On a turn that names no model (turn_model: Codex's pick not yet seen, or a
+    pick the worker does not know), the chat's own choice goes through unchanged, and a chat that chose nothing gets
+    None: the worker does not know the Fast tier of a model it does not name, so it neither guesses one nor drops one."""
+    if not turn_model(model):
+        return choice
+    return run_fast(choice, model_fast(named))
 
 
 def run_fast(choice: bool | None, offered: bool | None) -> bool | None:
@@ -5633,9 +5642,8 @@ def create_approval_session(
         thread_params["threadId"], proc = open_thread(thread_params)
     assert proc is not None
     model_field = turn_model(model)
-    # The tier goes only with a named model: execution["fast"] is the Fast default of the model the worker assumed,
-    # and a turn that names none runs on Codex's own pick, which may have another default.
-    tier_field = turn_service_tier(execution) if model_field else {}
+    # A turn that names no model and whose chat chose no Fast setting has fast None (turn_fast), so it sends no tier.
+    tier_field = turn_service_tier(execution)
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
@@ -5661,7 +5669,7 @@ def turn_model(model: str) -> dict[str, str]:
     keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
     by name (codex_default_model: the live list's default, else /status). The pick is named only when it is a model
     the worker knows: for any other model /status gives its display text, which is not a model id. Before either named
-    a known pick, the turn names none, as before, and no service tier either.
+    a known pick, the turn names none, as before, and no service tier unless the chat chose Fast on or off (turn_fast).
     """
     if model not in {"default", "gpt-5.3-codex"}:
         return {"model": model}

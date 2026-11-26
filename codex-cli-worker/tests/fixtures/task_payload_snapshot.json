@@ -135,7 +135,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -227,7 +227,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -398,7 +398,7 @@
           "details": "Removed the copies.",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -498,7 +498,7 @@
           "details": "Removed the copies.",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -661,7 +661,7 @@
           "details": "Could not start /usr/local/bin/codex: no such file",
           "error": "Could not start /usr/local/bin/codex: no such file",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -753,7 +753,7 @@
           "details": "Could not start /usr/local/bin/codex: no such file",
           "error": "Could not start /usr/local/bin/codex: no such file",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -920,7 +920,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1039,7 +1039,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1225,7 +1225,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1331,7 +1331,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1563,7 +1563,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1603,7 +1603,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1714,7 +1714,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1754,7 +1754,7 @@
           "details": "",
           "error": "",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -1930,7 +1930,7 @@
           "details": "Codex exited before writing the final response file (returncode=1).",
           "error": "Codex timed out after 1 seconds.",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
@@ -2030,7 +2030,7 @@
           "details": "Codex exited before writing the final response file (returncode=1).",
           "error": "Codex timed out after 1 seconds.",
           "execution_settings": {
-            "fast": false,
+            "fast": null,
             "model": "default",
             "reasoning_effort": "medium"
           },
