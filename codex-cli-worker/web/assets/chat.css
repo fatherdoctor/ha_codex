@@ -1189,6 +1189,43 @@ textarea {
   padding: 0 3px;
   display: block;
 }
+/* The button at the top right of the message box that gives it the chat's full height, and takes it back. */
+.expand-message {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+.expand-message svg {
+  width: 18px;
+  height: 18px;
+}
+.expand-message:hover,
+.expand-message:focus-visible {
+  color: var(--text);
+}
+#composer .icon-collapse,
+#composer.expanded .icon-expand {
+  display: none;
+}
+#composer.expanded .icon-collapse {
+  display: block;
+}
+#composer #message {
+  padding-right: 32px;
+}
+#composer.expanded #message {
+  max-height: none;
+}
 #composer:focus-within {
   border-color: var(--muted);
 }

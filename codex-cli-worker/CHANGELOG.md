@@ -15,6 +15,10 @@
   0.6"); keep them in your file if you want them. A chat from before the update gets the built-in instructions with
   its next message.
 
+- **Expand the message box.** A button at the top right of the message box gives it the chat's full height for a
+  long message, and a second press takes it back. Sending the message collapses it. The transcript stays at the line
+  it showed, and on a phone or iPad the box stays above the on-screen keyboard. A drag handle on the top border was
+  left out: it could not be tested in the Home Assistant app on an iPad.
 - **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
   the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
   selects the code instead, so you can copy it by hand.
