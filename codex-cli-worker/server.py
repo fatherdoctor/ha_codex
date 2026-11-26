@@ -43,7 +43,7 @@ from flask import Flask, Response, jsonify, request, send_file
 # Also support the existing importlib-based test harness.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verification import Verification, public_check
-from approvals import APPROVAL_GONE
+from approvals import APPROVAL_GONE, DECISIONS
 from safety_block import SafetyBlockSession as AppServerSession
 import codex_host
 import full_access
@@ -8281,10 +8281,13 @@ def ingress_admin(action: str = "answer permission requests") -> tuple[dict[str,
 @app.post("/tasks/<task_id>/approvals/<approval_id>")
 @require_auth
 def decide_approval(task_id: str, approval_id: str) -> Response:
-    """Answer a native permission request for the current exchange, once only, as a Home Assistant administrator."""
+    """Answer a native permission request for the current exchange, once only, as a Home Assistant administrator.
+
+    The page sends a word (DECISIONS); the session maps it to Codex's decision, so the page never names a scope.
+    """
     payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not isinstance(payload.get("decision"), str) or payload["decision"] not in {"allow", "deny"}:
-        return jsonify({"ok": False, "error": "decision must be allow or deny"}), 400
+    if not isinstance(payload, dict) or not isinstance(payload.get("decision"), str) or payload["decision"] not in DECISIONS:
+        return jsonify({"ok": False, "error": "decision must be allow, allow_chat or deny"}), 400
     admin, refusal = ingress_admin()
     if admin is None:
         return jsonify({"ok": False, "error": refusal}), 403

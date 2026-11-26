@@ -1238,14 +1238,18 @@ function approvalHeadline(approval) {
 }
 /**
  * Show a native permission request as text, with its precise action and
- * scope. While it waits for the owner it is a full card with the two answers.
- * Once answered (or expired) it shrinks to one closed line, such as
- * "Allowed once: ls /homeassistant", that opens to the same details.
+ * scope. While it waits for the owner it is a full card with its answers: Allow
+ * once and Deny, and the worker's chat-wide answer when it offers one (its label
+ * and meaning come from the worker). Once answered (or expired) it shrinks to
+ * one closed line, such as "Allowed once: ls /homeassistant", that opens to the
+ * same details.
  */
 function renderApproval(approval, taskId, turnId, active) {
   const pending = active && approval.status === "pending";
   const statuses = { allowed: "Allowed once", denied: "Denied", expired: "Expired" };
-  const status = pending ? "Permission needed" : statuses[approval.status] || "Expired";
+  // The worker names a chat-wide answer, such as "Allowed for this chat".
+  const answered = (approval.status === "allowed" && approval.allowed_for) || statuses[approval.status];
+  const status = pending ? "Permission needed" : answered || "Expired";
   const card = textNode(pending ? "section" : "details", "", pending ? "permission-card" : "permission-card disclosure is-answered");
   card.setAttribute("aria-label", "Permission request");
   if (pending) card.append(textNode("strong", status));
@@ -1274,14 +1278,17 @@ function renderApproval(approval, taskId, turnId, active) {
     card.append(textNode("pre", change.diff || "No diff available", "permission-diff"));
   }
   if (approval.note) card.append(textNode("p", approval.note, "permission-note"));
+  if (pending && approval.can_allow_chat && approval.chat_scope) card.append(textNode("p", approval.chat_scope, "permission-note"));
   if (pending) {
     const actions = textNode("div", "", "choices");
     actions.setAttribute("role", "group");
     actions.setAttribute("aria-label", "Permission decision");
-    for (const [decision, label] of [["allow", "Allow once"], ["deny", "Deny"]]) {
+    const answers = [["allow", "Allow once"], ["deny", "Deny"]];
+    if (approval.can_allow_chat && approval.chat_label) answers.splice(1, 0, ["allow_chat", approval.chat_label]);
+    for (const [decision, label] of answers) {
       const button = textNode("button", label, "subtle permission-action");
       button.type = "button";
-      button.dataset.canAllow = String(decision !== "allow" || approval.can_allow);
+      button.dataset.canAllow = String(decision === "deny" || approval.can_allow);
       button.disabled = state.busy || button.dataset.canAllow === "false";
       button.onclick = () => sendApproval(taskId, turnId, approval.approval_id, decision);
       actions.append(button);
