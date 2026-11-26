@@ -179,6 +179,18 @@
               aria-label="Commands"
               hidden
             ></div>
+            <button
+              id="expand-message"
+              class="expand-message"
+              type="button"
+              aria-controls="message"
+              aria-expanded="false"
+              aria-label="Expand message box"
+              title="Expand message box"
+            >
+              <svg class="icon-expand" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M13,9V15H16L12,19L8,15H11V9H8L12,5L16,9H13M4,2H20V4H4V2M4,20H20V22H4V20Z" /></svg>
+              <svg class="icon-collapse" aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M4,12H20V14H4V12M4,9H20V11H4V9M16,4L12,8L8,4H11V1H13V4H16M8,19L12,15L16,19H13V22H11V19H8Z" /></svg>
+            </button>
             <label class="sr-only" for="message">Message Codex</label
             ><textarea
               id="message"

@@ -447,10 +447,56 @@ function sidebar(open) {
     matchMedia("(max-width:700px)").matches && open;
   if (open) $("new-chat").focus();
 }
-/** Fit the height of the message box to its text, up to 180 pixels. */
+// When the message box is expanded, at least this much of the transcript stays in view above it.
+const TRANSCRIPT_KEEP = 48;
+/**
+ * Return the height of the expanded message box: the transcript's room less a strip of it, and never past the
+ * visible screen, which an on-screen keyboard makes shorter on a phone or iPad (visualViewport). The strip is at
+ * least the transcript's padding and minimum height, below which it cannot shrink; with less, the composer would
+ * overflow and each new line would add the difference again.
+ */
+function expandedHeight() {
+  const message = $("message");
+  const area = $("messages");
+  const style = getComputedStyle(area);
+  const floor = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  const keep = Math.max(TRANSCRIPT_KEEP, floor, parseFloat(style.minHeight) || 0);
+  // After the window shrinks, the composer may hang past the bottom of the chat column until it is resized.
+  const overflow = Math.max(
+    0,
+    document.querySelector(".compose-area").getBoundingClientRect().bottom -
+      document.querySelector("main").getBoundingClientRect().bottom,
+  );
+  const room = message.offsetHeight + area.clientHeight - keep - overflow;
+  const rest = $("composer").offsetHeight - message.offsetHeight;
+  const visible = (window.visualViewport?.height || window.innerHeight) - rest - keep;
+  return Math.max(180, Math.floor(Math.min(room, visible)));
+}
+/** Fit the height of the message box to its text, up to 180 pixels, or give it the expanded height. */
 function resizeInput() {
-  $("message").style.height = "auto";
-  $("message").style.height = Math.min(180, $("message").scrollHeight) + "px";
+  const message = $("message");
+  if ($("composer").classList.contains("expanded")) {
+    message.style.height = expandedHeight() + "px";
+    return;
+  }
+  message.style.height = "auto";
+  message.style.height = Math.min(180, message.scrollHeight) + "px";
+}
+/**
+ * Expand the message box to the chat's full height, or collapse it. The transcript stays where it was: at its
+ * end if it was there, otherwise at the same line.
+ */
+function setComposerExpanded(expanded) {
+  const area = $("messages");
+  const atEnd = area.scrollHeight - area.scrollTop - area.clientHeight < 100;
+  const top = area.scrollTop;
+  const label = expanded ? "Collapse message box" : "Expand message box";
+  $("composer").classList.toggle("expanded", expanded);
+  $("expand-message").setAttribute("aria-expanded", String(expanded));
+  $("expand-message").setAttribute("aria-label", label);
+  $("expand-message").title = label;
+  resizeInput();
+  area.scrollTop = atEnd ? area.scrollHeight : top;
 }
 /** Say when a waiting message will start, from its place in the queue. */
 function queueNote(entry) {
@@ -2405,6 +2451,7 @@ $("composer").addEventListener("submit", async (event) => {
     state.chatSettings.delete(id);
     clearUploads();
     $("message").value = "";
+    setComposerExpanded(false);
     if (result.status !== "in_queue") state.active = result.task_id;
     state.busy = false;
     await selectChat(result.task_id);
@@ -2647,6 +2694,16 @@ $("composer").addEventListener("drop", (event) => {
   event.preventDefault();
   acceptFiles(event.dataTransfer.files);
 });
+$("expand-message").onclick = () => {
+  setComposerExpanded(!$("composer").classList.contains("expanded"));
+  $("message").focus();
+};
+/** Fit the expanded message box to a new window or keyboard height; a collapsed box fits its text alone. */
+function refitExpanded() {
+  if ($("composer").classList.contains("expanded")) resizeInput();
+}
+window.addEventListener("resize", refitExpanded);
+window.visualViewport?.addEventListener("resize", refitExpanded);
 $("message").addEventListener("input", () => {
   resizeInput();
   renderSlash();
