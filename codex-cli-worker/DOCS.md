@@ -67,6 +67,12 @@ You can change the mode in the middle of a chat. The next message runs in the ne
 
 A request shows a card with the full command or change and two buttons, **Allow once** and **Deny**. Only a Home
 Assistant administrator can answer. Read each card before you allow it.
+
+A command or a file change also has **Allow for this chat**. Codex then runs the same command in the same folder, or
+changes the same files, without a new question. A different command or file still asks. The answer lasts until the
+chat is paused or the app restarts; Codex then asks again. The app pauses an idle chat when you use three others. If
+the app runs a message in its own Codex process (warm start off, or the live process could not take it), the button
+reads **Allow for this message** and lasts for that message only. A tool request has no such button.
 More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#sandbox).
 
 ## Your files

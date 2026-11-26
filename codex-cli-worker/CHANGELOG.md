@@ -2,6 +2,10 @@
 
 ## 0.6.0 (unreleased)
 
+- **Allow for this chat.** A permission card for a command or a file change has a third button. It uses Codex's own
+  session answer: the same command in the same folder, or the same files, run without a new question until the chat
+  is paused or the app restarts. Other commands and files still ask. A tool request keeps only **Allow once** and
+  **Deny**.
 - **Built-in instructions.** The app now sends its own instructions with every chat, on the page and in remote
   control: the folders, the Home Assistant tools, how to read logs, and the rules for secrets and for Git and GitHub.
   An update of the app updates them. **Settings** > **Workspace instructions** shows them read-only above the

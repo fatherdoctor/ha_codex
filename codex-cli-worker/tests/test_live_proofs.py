@@ -453,7 +453,7 @@ def accept_everything(method: str, _params: dict[str, Any]) -> dict[str, Any]:
     """Accept every request from Codex, in the form the worker's own session answers it (approvals.py)."""
     from approvals import TOOL_APPROVAL, decision_result
 
-    return decision_result("tool" if method == TOOL_APPROVAL else "command", True)
+    return decision_result("tool" if method == TOOL_APPROVAL else "command", "allow")
 
 
 class AppServer:

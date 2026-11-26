@@ -49,6 +49,11 @@ async function testApprovals(browser, output, errors) {
   assert.equal(await approvalPage.locator(".permission-card img").count(), 0);
   assert.match(await approvalPage.locator(".permission-command").textContent(), /<img src=x onerror=alert\(1\)>/);
   assert.match(await approvalPage.locator(".permission-scope").textContent(), /outside the configured sandbox/);
+  // CX-APPROVE-CHAT: a command offers the chat-wide answer between Allow once and Deny, with what it means. The
+  // fixture runs each exchange in its own Codex process, so the worker names it for this message.
+  const answers = await approvalPage.locator(".permission-action").allTextContents();
+  assert.deepEqual(answers, ["Allow once", "Allow for this message", "Deny"]);
+  assert.match(await approvalPage.locator(".permission-card").textContent(), /Allow for this message: Codex runs this same command in this folder without asking again/);
   assert.equal(await approvalPage.locator("#cancel").isVisible(), true);
   await approvalPage.locator("#message").fill("Keep this draft while permission is answered");
   await approvalPage.screenshot({path: path.join(output, "permission-desktop.png"), fullPage: true});
@@ -92,6 +97,7 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.getByRole("button", {name: "Send message", exact: true}).click();
   await approvalPage.getByRole("button", {name: "Deny", exact: true}).waitFor();
   assert.equal(await approvalPage.getByRole("button", {name: "Allow once", exact: true}).isDisabled(), true);
+  assert.equal(await approvalPage.getByRole("button", {name: "Allow for this message", exact: true}).count(), 0);
   assert.match(await approvalPage.locator(".permission-note").textContent(), /redacted/);
   assert.doesNotMatch(await approvalPage.locator(".permission-card").textContent(), /private password/);
   await approvalPage.getByRole("button", {name: "Deny", exact: true}).click();
@@ -102,8 +108,9 @@ async function testApprovals(browser, output, errors) {
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).waitFor();
   assert.match(await approvalPage.locator(".permission-card").textContent(), /update: \/other\/original.yaml/);
   assert.match(await approvalPage.locator(".permission-card").textContent(), /Move to: \/other\/renamed.yaml/);
-  await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
-  await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
+  // CX-APPROVE-CHAT: a file change can be allowed for the rest of the exchange; the closed line says so.
+  await approvalPage.getByRole("button", {name: "Allow for this message", exact: true}).click();
+  await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed for this message$/}).waitFor();
   // CX-SIMPLE.B: Codex's own request before a tool call shows the tool and every argument, as text.
   await approvalPage.locator("#new-chat").click();
   await approvalPage.locator("#message").fill("Request permission to call a tool");
@@ -116,6 +123,8 @@ async function testApprovals(browser, output, errors) {
   assert.equal(JSON.parse(toolArguments).data.message, "Dinner is ready.\n<img src=x onerror=alert(1)>");
   assert.equal(await approvalPage.locator(".permission-card img").count(), 0);
   assert.equal(await approvalPage.getByRole("button", {name: "Allow once", exact: true}).isDisabled(), false);
+  // CX-APPROVE-CHAT: a tool request has no chat-wide answer.
+  assert.deepEqual(await approvalPage.locator(".permission-action").allTextContents(), ["Allow once", "Deny"]);
   await approvalPage.getByRole("button", {name: "Allow once", exact: true}).click();
   await approvalPage.locator(".permission-card strong").filter({hasText: /^Allowed once$/}).waitFor();
   // A request too long to show in full can only be denied.

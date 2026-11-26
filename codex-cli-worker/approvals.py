@@ -2,7 +2,9 @@
 
 The worker owns the process and authentication. This adapter owns JSON-RPC
 correlation and live requests; only redacted display records leave it. Approval
-responses never install command rules or grant access for a session.
+responses never install command rules. The one wider answer is "Allow for this
+chat", which sends Codex's own session decision (acceptForSession) for a command
+or file change; Codex keeps it in memory for the loaded thread only.
 """
 
 from __future__ import annotations
@@ -26,6 +28,14 @@ PLAN_STEP_LIMIT = 50
 COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 FILE_APPROVAL = "item/fileChange/requestApproval"
 TOOL_APPROVAL = "mcpServer/elicitation/request"
+# The answers the page can send. "allow_chat" is the page's word, never a protocol value: the worker alone maps it to
+# Codex's acceptForSession (decision_result), and only for a request that offers it (can_allow_chat).
+DECISIONS = frozenset({"allow", "allow_chat", "deny"})
+# Codex's session decision for a command or a file change (app-server-protocol v2/item.rs at rust-v0.166.0). Codex
+# then runs the same command in the same folder, or changes the same files, without a new question while the thread
+# stays loaded (core tools/sandboxing.rs, with_cached_approval). The cache is in memory: a new process or a thread
+# that unloads and resumes starts empty.
+SESSION_DECISION = "acceptForSession"
 
 # The (server, tool) pairs whose action requests get a page card: the plain Home Assistant tool that server.py
 # registers as home_assistant_call, and the write tools of the bundled Home Assistant MCP server (hass_mcp.py), which
@@ -63,12 +73,14 @@ def _elicitation_refusal(params: dict[str, Any]) -> str:
     return f"{source} asked a question this page cannot show, so it was declined and nothing was changed."
 
 
-def decision_result(kind: str, allow: bool) -> dict[str, Any]:
+def decision_result(kind: str, decision: str) -> dict[str, Any]:
     """The reply Codex reads for a request of this kind: a tool's form, or a command's or file change's decision."""
     if kind == "tool":
+        if decision == "allow_chat":
+            raise ValueError("A tool request has no answer for this chat.")
         # Accept with no remember option is one approval; Codex asks again before the next call.
-        return {"action": "accept" if allow else "decline", "content": None, "_meta": None}
-    return {"decision": "accept" if allow else "decline"}
+        return {"action": "accept" if decision == "allow" else "decline", "content": None, "_meta": None}
+    return {"decision": {"allow": "accept", "allow_chat": SESSION_DECISION}.get(decision, "decline")}
 
 
 def _is_tool_question(params: dict[str, Any]) -> bool:
@@ -542,7 +554,7 @@ class AppServerSession:
             raise ValueError("duplicate live permission request")
         kind = {COMMAND_APPROVAL: "command", FILE_APPROVAL: "file_change", TOOL_APPROVAL: "tool"}[method]
         if len(self._records) >= REQUEST_LIMIT:
-            self._write({"id": request_id, "result": decision_result(kind, False)})
+            self._write({"id": request_id, "result": decision_result(kind, "deny")})
             self.on_event({"type": "error", "message": "Too many permission requests in this exchange; request denied."})
             return
         reason, _ = self._display(params.get("reason"))
@@ -605,6 +617,7 @@ class AppServerSession:
             record["note"] = "The complete action is missing, too large, or redacted. Deny it and request an action without hidden details."
         else:
             record["note"] = "Known credentials are hidden. This does not change your sandbox setting or approve future requests."
+        record.update(self._chat_offer(record, params))
         record["confirmation"] = confirmation(record)
         self._records.append(record)
         self._pending[record["approval_id"]] = request_id
@@ -612,6 +625,31 @@ class AppServerSession:
             self._pending_files[record["approval_id"]] = str(params.get("itemId"))
         # Persist the reviewable request before it can receive a decision.
         self.on_approvals(copy.deepcopy(self._records))
+
+    def _chat_offer(self, record: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Say whether the card offers "Allow for this chat", with the button's label and what it means here.
+
+        Only a command or a file change that can be allowed once gets it, because only those have Codex's session
+        decision. A tool question is left out: its session answer would allow every later call of that tool with any
+        arguments, which the card cannot show. When Codex lists the decisions it accepts, the offer follows the list.
+        On the start path the Codex process ends with the exchange, so the answer lasts for this message only.
+        """
+        offered = params.get("availableDecisions")
+        if (record["kind"] not in ("command", "file_change") or not record["can_allow"]
+                or (isinstance(offered, list) and SESSION_DECISION not in offered)):
+            return {"can_allow_chat": False}
+        if record["kind"] == "file_change":
+            what = "Codex changes these same files without asking again"
+        elif record.get("network"):
+            what = f"Codex reaches {record['network']} without asking again"
+        else:
+            what = "Codex runs this same command in this folder without asking again"
+        if self.owns_connection:
+            span, lasts = "this message", "until this message is done"
+        else:
+            span, lasts = "this chat", "until the chat is paused or the app restarts"
+        return {"can_allow_chat": True, "chat_span": span, "chat_label": f"Allow for {span}",
+                "chat_scope": f"Allow for {span}: {what}, {lasts}. Other commands and files still ask."}
 
     def _app_names(self, tool: str, connector_name: Any) -> tuple[str, str]:
         """The tool and app names that an app card and its log line show; a name that redaction changes is generic."""
@@ -653,25 +691,29 @@ class AppServerSession:
         Persistence precedes the write to Codex. If either fails, the connection
         is closed so a retry cannot accidentally authorize the action twice.
         """
-        if decision not in {"allow", "deny"}:
-            raise ValueError("decision must be allow or deny")
+        if decision not in DECISIONS:
+            raise ValueError("decision must be allow, allow_chat or deny")
         with self.lock:
             if self._closed or not self.is_active() or approval_id not in self._pending:
                 raise LookupError(APPROVAL_GONE)
             record = next(item for item in self._records if item["approval_id"] == approval_id)
-            if decision == "allow" and not record["can_allow"]:
+            if decision != "deny" and not record["can_allow"]:
                 # The note already says why this request can only be denied.
                 raise ValueError(record["note"])
+            if decision == "allow_chat" and not record.get("can_allow_chat"):
+                raise ValueError("This request cannot be allowed for the whole chat. Allow it once or deny it.")
             request_id = self._pending.pop(approval_id)
             self._pending_files.pop(approval_id, None)
             # The stall clock starts again from the answer, not from when the request arrived.
             self.last_activity = time.monotonic()
-            record["status"] = "allowed" if decision == "allow" else "denied"
+            record["status"] = "denied" if decision == "deny" else "allowed"
+            if decision == "allow_chat":
+                record["allowed_for"] = f"Allowed for {record['chat_span']}"
             if decided_by:
                 record["decided_by"] = dict(decided_by)
             try:
                 self.on_approvals(copy.deepcopy(self._records))
-                self._write({"id": request_id, "result": decision_result(record["kind"], decision == "allow")})
+                self._write({"id": request_id, "result": decision_result(record["kind"], decision)})
             except (OSError, ValueError):
                 record["status"] = "expired"
                 self.fail("Could not deliver the permission decision. The exchange was stopped.")

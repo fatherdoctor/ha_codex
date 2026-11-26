@@ -789,7 +789,11 @@
         {
           "approval_id": "<turn-2>",
           "can_allow": true,
+          "can_allow_chat": true,
           "changes": [],
+          "chat_label": "Allow for this message",
+          "chat_scope": "Allow for this message: Codex runs this same command in this folder without asking again, until this message is done. Other commands and files still ask.",
+          "chat_span": "this message",
           "command": "ls /homeassistant",
           "confirmation": {
             "effect": "Only what that command does; it may read files and use the network.",
@@ -845,7 +849,11 @@
         {
           "approval_id": "<turn-2>",
           "can_allow": true,
+          "can_allow_chat": true,
           "changes": [],
+          "chat_label": "Allow for this message",
+          "chat_scope": "Allow for this message: Codex runs this same command in this folder without asking again, until this message is done. Other commands and files still ask.",
+          "chat_span": "this message",
           "command": "ls /homeassistant",
           "confirmation": {
             "effect": "Only what that command does; it may read files and use the network.",
@@ -896,7 +904,11 @@
             {
               "approval_id": "<turn-2>",
               "can_allow": true,
+              "can_allow_chat": true,
               "changes": [],
+              "chat_label": "Allow for this message",
+              "chat_scope": "Allow for this message: Codex runs this same command in this folder without asking again, until this message is done. Other commands and files still ask.",
+              "chat_span": "this message",
               "command": "ls /homeassistant",
               "confirmation": {
                 "effect": "Only what that command does; it may read files and use the network.",
@@ -968,7 +980,11 @@
         {
           "approval_id": "<turn-2>",
           "can_allow": true,
+          "can_allow_chat": true,
           "changes": [],
+          "chat_label": "Allow for this message",
+          "chat_scope": "Allow for this message: Codex runs this same command in this folder without asking again, until this message is done. Other commands and files still ask.",
+          "chat_span": "this message",
           "command": "ls /homeassistant",
           "confirmation": {
             "effect": "Only what that command does; it may read files and use the network.",
@@ -1015,7 +1031,11 @@
             {
               "approval_id": "<turn-2>",
               "can_allow": true,
+              "can_allow_chat": true,
               "changes": [],
+              "chat_label": "Allow for this message",
+              "chat_scope": "Allow for this message: Codex runs this same command in this folder without asking again, until this message is done. Other commands and files still ask.",
+              "chat_span": "this message",
               "command": "ls /homeassistant",
               "confirmation": {
                 "effect": "Only what that command does; it may read files and use the network.",
