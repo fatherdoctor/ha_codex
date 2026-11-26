@@ -4,26 +4,33 @@ import json
 import os
 import socket
 import sys
+from typing import Any
 
+import scheduling
 import tool_threads
 
-PROPOSAL = {'type': 'object', 'additionalProperties': False,
+PROPOSAL: dict[str, Any] = {'type': 'object', 'additionalProperties': False,
             'properties': {'name': {'type': 'string', 'maxLength': 80},
                            'prompt': {'type': 'string', 'maxLength': 16000},
                            'mode': {'enum': ['default', 'read-only']},
-                           'spec': {'type': 'object', 'description': 'interval: kind/seconds; cron: kind/expression (five numeric UTC fields); once: kind/at (ISO with offset).'}},
+                           'spec': {'type': 'object', 'description': 'interval: kind/seconds; cron: kind/expression (five numeric fields in the Home Assistant time zone); once: kind/at (an ISO time; without an offset it is in the Home Assistant time zone).'}},
             'required': ['name', 'prompt', 'spec']}
 # No minimum or maximum here: a limit outside 1-20 is clamped by the service
 # (a larger one returns 20 items and a next_offset), never refused.
-LIMIT = {'type': 'integer', 'description': 'Items per page, 1-20 (default 10). A larger number returns 20 items and a next_offset to continue from.'}
-TOOLS = [
-    {'name': 'propose_schedule', 'description': 'Save a schedule proposal for owner review. It remains disabled until a Home Assistant administrator approves its exact current contents on the page. Cannot approve or activate it.', 'inputSchema': PROPOSAL},
-    {'name': 'list_schedules', 'description': 'Read a bounded page of schedule summaries. This does not enable or change schedules.',
-     'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {'offset': {'type': 'integer', 'minimum': 0, 'maximum': 100}, 'limit': LIMIT}}},
+LIMIT: dict[str, Any] = {'type': 'integer', 'description': 'Items per page, 1-20 (default 10). A larger number returns 20 items and a next_offset to continue from.'}
+TOOLS: list[dict[str, Any]] = [
+    {'name': 'propose_schedule', 'description': 'Save a schedule. A one-time wakeup (kind once) is on when saved and runs in this chat at its time. A repeating schedule remains disabled until a Home Assistant administrator approves its exact current contents on the page; this tool cannot approve or activate it. The answer gives next_run in the Home Assistant time zone.', 'inputSchema': PROPOSAL},
+    {'name': 'list_schedules', 'description': 'Read a bounded page of schedule summaries: active, paused and waiting ones first, then one-time wakeups that already ran. This does not enable or change schedules.',
+     'inputSchema': {'type': 'object', 'additionalProperties': False, 'properties': {'offset': {'type': 'integer', 'minimum': 0, 'maximum': scheduling.LISTED}, 'limit': LIMIT}}},
 ]
 
 
-def fetch(name, arguments, thread_id):
+def fetch(name: Any, arguments: Any, thread_id: str) -> Any:
+    """Send one tool call to the add-on's scheduling socket and return its decoded answer.
+
+    The name and the arguments come from Codex unchecked, so they are checked here first; each refusal is a
+    ValueError with a fixed sentence.
+    """
     tool = next((t for t in TOOLS if t['name'] == name), None)
     if tool is None:
         raise ValueError('Unknown scheduling tool; the tools are ' + ', '.join(t['name'] for t in TOOLS) + '.')
@@ -44,7 +51,8 @@ def fetch(name, arguments, thread_id):
     return json.loads(raw)
 
 
-def respond(request):
+def respond(request: dict[str, Any]) -> dict[str, Any]:
+    """Return the result of one MCP request; raise ValueError for a method this server does not have."""
     method = request.get('method')
     if method == 'initialize':
         return {'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'codex_scheduling', 'version': '1'}}
@@ -70,7 +78,8 @@ def respond(request):
     raise ValueError('Unsupported method')
 
 
-def main():
+def main() -> int:
+    """Answer MCP requests, one JSON line each, on stdin and stdout until stdin closes."""
     while raw := sys.stdin.buffer.readline(65537):
         if len(raw) > 65536:
             return 1

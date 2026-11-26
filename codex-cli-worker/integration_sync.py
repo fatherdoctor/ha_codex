@@ -1,9 +1,9 @@
-"""Install or update the Codex integration in /config from the copy bundled in this app's image.
+"""Install or update the Codex integration in /homeassistant from the copy bundled in this app's image.
 
 The app image carries the integration of the same release under BUNDLED_DIR. At each start, before the
 worker's server starts, this script:
 
-- writes that copy to /config/custom_components/codex_cli when the folder is missing, or when the folder
+- writes that copy to /homeassistant/custom_components/codex_cli when the folder is missing, or when the folder
   carries this app's marker file, still holds exactly the copy the marker names, and the marker names a
   different bundle;
 - leaves the folder untouched when it was installed another way (no marker file, or a symbolic link), or
@@ -20,8 +20,8 @@ Supervisor discovery, so the integration offers setup under Settings > Devices &
 Home Assistant has loaded the integration's files: a discovery that arrives before then makes Home
 Assistant log "Cannot find integration codex_cli" with a traceback.
 
-It writes nothing in /config except the integration's folder and its own work folder
-/config/.codex_cli_install, which Home Assistant never loads from and which is emptied at every start
+It writes nothing in /homeassistant except the integration's folder and its own work folder
+/homeassistant/.codex_cli_install, which Home Assistant never loads from and which is emptied at every start
 while the copy is on. The app option install_integration (default on) turns the copy off; discovery is
 announced either way, once Home Assistant has loaded the integration, however it was installed. The
 script never stops the app from starting: every failure is logged and reported, and the worker starts as
@@ -41,11 +41,13 @@ from pathlib import Path
 
 import requests
 
+from app_paths import CONFIG_ROOT
+
 BUNDLED_DIR = Path("/usr/share/ha_codex/integration/codex_cli")
-TARGET_DIR = Path("/config/custom_components/codex_cli")
+TARGET_DIR = CONFIG_ROOT / "custom_components" / "codex_cli"
 # The work folder is on the same file system as the target, so the renames in swap_in are atomic, but
 # outside custom_components, so Home Assistant's loader never reads a half-written or old copy.
-WORK_DIR = Path("/config/.codex_cli_install")
+WORK_DIR = CONFIG_ROOT / ".codex_cli_install"
 BACKUP_DIR = Path("/data/integration_backup/codex_cli")
 OPTIONS_PATH = Path("/data/options.json")
 NOTICE_STATE_PATH = Path("/data/integration_sync.json")
@@ -241,7 +243,7 @@ def sync(bundled: Path, target: Path, backup: Path, app_version: str, work: Path
 
 def notice_for(result: SyncResult, app_version: str) -> tuple[str, str, str] | None:
     """Return the notification to show for a sync result as (id, title, message), or None for none."""
-    folder = "/config/custom_components/codex_cli"
+    folder = TARGET_DIR.as_posix()
     if result.action == "installed":
         return (
             NOTICE_RESTART,
@@ -321,7 +323,7 @@ def supervisor_post(path: str, payload: dict, token: str) -> bool:
 def core_knows_integration(token: str) -> bool | None:
     """Return whether Home Assistant has loaded the integration's files, or None when it cannot tell.
 
-    Home Assistant reads the custom integrations in /config only when it starts, and lists each one that
+    Home Assistant reads the custom integrations in /homeassistant only when it starts, and lists each one that
     has a config flow under flow_handlers. A folder the app wrote after that start is not listed until
     Home Assistant restarts.
     """

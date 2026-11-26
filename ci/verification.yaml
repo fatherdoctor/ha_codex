@@ -42,6 +42,8 @@ jobs:
           echo "NODE_PATH=$RUNNER_TEMP/browser-deps/node_modules" >> "$GITHUB_ENV"
       - name: Find the test browser
         run: echo "HA_BROWSER_EXECUTABLE=$(node -e 'console.log(require("playwright").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Code checks (file size, globals by name, server.py patch count)
+        run: python scripts/code_checks.py
       - name: Test worker and real Home Assistant authentication/frontend
         env:
           HA_BROWSER_NODE: node
@@ -57,6 +59,7 @@ jobs:
           done
           node codex-cli-worker/tests/browser_smoke.cjs
           node codex-cli-worker/tests/browser_copy.cjs
+          node codex-cli-worker/tests/browser_code_copy.cjs
           node codex-cli-worker/tests/browser_settings_phone.cjs
           node codex-cli-worker/tests/browser_remote_name.cjs
           node codex-cli-worker/tests/browser_full_access.cjs
@@ -84,7 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Bundle the integration into the app image
-        # The app installs this copy in /config at start (codex-cli-worker/integration/README.md).
+        # The app installs this copy in /homeassistant at start (codex-cli-worker/integration/README.md).
         run: python3 scripts/bundle_integration.py
       - name: Build without publishing
         run: docker build --build-arg BUILD_ARCH=${{ matrix.arch }} --build-arg BUILD_VERSION=pr-test -t verification-test codex-cli-worker
@@ -104,6 +107,10 @@ jobs:
       - name: Check the image has no dashboard browser
         # Version 0.4 removed the dashboard screenshots, and with them Chromium and Playwright.
         run: docker run --rm --entrypoint sh verification-test -c '! command -v chromium-browser && ! test -e /opt/verification && ! test -e /browser.cjs'
+      - name: Check the image has no /config folder
+        # Since 0.6 Home Assistant's configuration is mapped at /homeassistant (CX-HA-PATH). Nothing in the image
+        # may create /config or a link there, so a stale path fails here as it fails in the Claude add-on.
+        run: docker run --rm --entrypoint sh verification-test -c '! test -e /config && ! test -L /config'
       - name: Smoke test packaged historical data tools
         run: |
           docker run --rm --workdir / --entrypoint python3 verification-test -c 'import server, ha_data, ha_data_mcp; assert {tool["name"] for tool in ha_data_mcp.TOOLS} == {"history", "statistics", "exchange_info"}; assert {tool["name"] for tool in ha_data_mcp.STATUS_TOOLS} == {"ask_owner", "report_failure"}; assert server.ha_data is not server.verification'

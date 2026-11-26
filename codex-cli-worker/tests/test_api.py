@@ -34,10 +34,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         await self.client.list_tasks(limit=10, offset=20, order="updated_desc", summary=True)
         self.assertEqual(self.session.request.call_args.args, ("GET", "http://worker/tasks?limit=10&offset=20&order=updated_desc&summary=true"))
 
-    async def test_health_is_requested_with_the_worker_token(self):
-        """The health request carries the worker token, which the worker requires for it."""
-        await self.client.health()
-        self.assertEqual(self.session.request.call_args.args, ("GET", "http://worker/health"))
+    async def test_status_is_requested_with_the_worker_token(self):
+        """The status request carries the worker token, which the worker requires for it."""
+        await self.client.status()
+        self.assertEqual(self.session.request.call_args.args, ("GET", "http://worker/status"))
         self.assertEqual(self.session.request.call_args.kwargs["headers"], {"Authorization": "Bearer test-token"})
 
     async def test_continue_and_legacy_reply_use_correct_payloads(self):

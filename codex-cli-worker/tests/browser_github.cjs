@@ -7,6 +7,7 @@ const CODE = 'TEST-0000';
 const TOKEN = 'github_pat_' + 'S'.repeat(70);
 const REVOKE_APP = 'https://github.com/settings/apps/authorizations';
 const REVOKE_TOKEN = 'https://github.com/settings/tokens';
+const CONFIGURE = 'https://github.com/settings/installations/7';
 const idle = {status: 'idle', user_code: '', verification_uri: '', expires_at: null, error: ''};
 
 function status(state, extra = {}) {
@@ -19,7 +20,7 @@ function status(state, extra = {}) {
     permissions: connected ? {contents: 'write', metadata: 'read'} : null, permission_problem: null,
     expires_at: null, connected_at: connected ? '2026-11-16T12:00:00Z' : null,
     last_check: connected ? {at: '2026-11-16T13:00:00Z', state, reason: ''} : null, last_test: null,
-    revoke_url: REVOKE_APP, flow: idle, ...extra,
+    revoke_url: REVOKE_APP, add_repositories_url: connected ? CONFIGURE : '', flow: idle, ...extra,
   };
 }
 
@@ -40,10 +41,6 @@ function status(state, extra = {}) {
         connect: () => { github = status('connecting', {flow: {status: 'waiting_for_user', user_code: CODE,
           verification_uri: 'https://github.com/login/device', expires_at: '2026-11-16T13:15:00Z', expires_in: 900, error: ''}}); return [200, {ok: true, github}]; },
         cancel: () => { github = status('disconnected', {flow: {...idle, status: 'canceled'}}); return [200, {ok: true, github}]; },
-        test: () => { github = {...github, last_test: {at: '2026-11-16T13:01:00Z', ok: true, text: 'Read OK: 1 repository.'}}; return [200, {ok: true, github}]; },
-        check: () => { github = status('access_changed', {extra: ['synthetic-owner/new'], missing: ['synthetic-owner/old'],
-          repositories: [{full_name: 'synthetic-owner/house', private: true, push: true}, {full_name: 'synthetic-owner/new', private: false, push: true}]});
-          return [200, {ok: true, github}]; },
         accept: () => { github = status('ok'); return [200, {ok: true, github}]; },
         token: (body) => body.token === TOKEN && body.repository === 'synthetic-owner/house'
           ? (github = status('ok', {kind: 'token', revoke_url: REVOKE_TOKEN}), [200, {ok: true, github}])
@@ -54,7 +51,7 @@ function status(state, extra = {}) {
         'repos/clone': (body) => [200, {ok: true, text: `Cloned ${body.repository}.`, path: `/share/${body.folder}`, github}],
         'repos/link': (body) => [200, {ok: true, text: `${body.path} now uses ${body.repository} as origin.`, path: body.path, github}],
       };
-      await page.route(/\/github\/(connect|cancel|token|test|check|accept|disconnect|repos\/clone|repos\/link)$/, route => {
+      await page.route(/\/github\/(connect|cancel|token|accept|disconnect|repos\/clone|repos\/link)$/, route => {
         const name = new URL(route.request().url()).pathname.replace(/^.*\/github\//, '');
         assert.equal(route.request().method(), 'POST');
         const body = route.request().postDataJSON() || {};
@@ -62,6 +59,8 @@ function status(state, extra = {}) {
         const [code, data] = handlers[name](body);
         return reply(route, code, data);
       });
+      // The page has no Check now button: the test reads the status again, as the 5-minute poll does.
+      const reread = () => page.evaluate(() => loadGithub());
 
       await page.goto('http://127.0.0.1:9137/preview/');
       const conversations = page.getByRole('button', {name: 'Open conversations', exact: true});
@@ -82,7 +81,7 @@ function status(state, extra = {}) {
       await toggle.click();
       assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
       await page.waitForFunction(() => document.querySelector('#github-status').textContent === 'Not connected to GitHub.');
-      for (const id of ['github-test', 'github-check', 'github-accept', 'github-disconnect'])
+      for (const id of ['github-accept', 'github-disconnect'])
         assert.equal(await page.locator('#' + id).isHidden(), true, id);
 
       // Connect shows the code and GitHub's device page; Cancel clears it.
@@ -90,6 +89,11 @@ function status(state, extra = {}) {
       await card.locator('.signin-code').waitFor();
       assert.equal(await card.locator('.signin-code').textContent(), CODE);
       assert.equal(await card.locator('a[href="https://github.com/login/device"]').count(), 1);
+      // The QR code of the same page, from the worker, folded on a phone like the ChatGPT one.
+      const qr = card.locator('img.signin-qr');
+      assert.equal(await qr.getAttribute('src'), 'github/qr.svg?flow=' + encodeURIComponent('2026-11-16T13:15:00Z'));
+      assert.equal(await qr.getAttribute('alt'), 'QR code that opens the GitHub sign-in page');
+      assert.equal(await card.locator('details.signin-qr-fold').evaluate(d => d.open), width > 700);
       assert.equal(await page.locator('#github-cancel').isVisible(), true);
       assert.match(await card.locator('.signin-expiry').textContent(), /^The code expires in \d+:\d\d\.$/);
       assert.equal(await card.locator('.settings-status').textContent(), 'Connecting: enter the code');
@@ -113,7 +117,7 @@ function status(state, extra = {}) {
       await page.locator('#github-cancel').click();
       await card.locator('.signin-code').waitFor({state: 'detached'});
 
-      // Connect again; the worker finishes the flow and the 5-second poll shows the connection.
+      // Connect; the worker finishes the flow and the 5-second poll shows the connection.
       await page.locator('#github-connect').click();
       await card.locator('.signin-code').waitFor();
       github = status('ok', {email: 'SYNTHETIC_PRIVATE_EMAIL', token: 'ghu_' + 'X'.repeat(36),
@@ -127,11 +131,19 @@ function status(state, extra = {}) {
       assert.match(shown, /Does not expire; revoke it on GitHub/);
       assert.match(shown, /Contents read and write, Metadata read/);
       assert.doesNotMatch(shown, /SYNTHETIC_PRIVATE_EMAIL|ghu_X/);
+      // '1 repository' is the App installation's set: one line says so and links to GitHub's page that adds more.
+      assert.equal(await page.locator('#github-add-repositories').isVisible(), true);
+      assert.equal(await page.locator('#github-add-repositories-link').getAttribute('href'), CONFIGURE);
+      assert.match(shown, /Codex reaches only the repositories that the GitHub App is installed on\. Add repositories on GitHub, then press Accept this access when it appears\./);
 
-      // Read test and Check now; a new repository set shows the banner and Accept.
-      await page.locator('#github-test').click();
-      await page.waitForFunction(() => document.querySelector('#github-test-result').textContent === 'Read OK: 1 repository.');
-      await page.locator('#github-check').click();
+      // Connected: Sign in and Sign out, and no Read test or Check now (the 0.5.1 box test).
+      assert.equal(await page.locator('#github-connect').textContent(), 'Sign in');
+      assert.equal(await page.locator('#github-disconnect').textContent(), 'Sign out');
+      assert.equal(await card.getByRole('button', {name: /Read test|Check now|Connect again|Disconnect/}).count(), 0);
+      // A new repository set shows the banner and Accept.
+      github = status('access_changed', {extra: ['synthetic-owner/new'], missing: ['synthetic-owner/old'],
+        repositories: [{full_name: 'synthetic-owner/house', private: true, push: true}, {full_name: 'synthetic-owner/new', private: false, push: true}]});
+      await reread();
       await page.locator('#github-accept').waitFor({state: 'visible'});
       assert.match(await page.locator('#github-repositories').textContent(), /synthetic-owner\/new .*new, not accepted/);
       assert.match(await page.locator('#github-repositories').textContent(), /synthetic-owner\/old · no longer reached/);
@@ -140,40 +152,37 @@ function status(state, extra = {}) {
       await page.locator('#github-accept').waitFor({state: 'hidden'});
       assert.equal(await page.locator('#github-banner').isHidden(), true);
       // A permission problem cannot be accepted from the page.
-      handlers.check = () => [200, {ok: true, github}];
       github = status('access_changed', {permission_problem: 'more than Contents read and write'});
-      await page.locator('#github-check').click();
+      await reread();
       await page.waitForFunction(() => document.querySelector('#github-details').textContent.includes('more than Contents'));
       assert.equal(await page.locator('#github-accept').isHidden(), true);
-      github = status('ok');
-      await page.locator('#github-check').click();
-      await page.waitForFunction(() => document.querySelector('#github-result').textContent.includes('Check finished'));
 
-      // A failed Connect again shows its reason while the old sign-in stays (Astro F2).
+      // A failed new sign-in shows its reason while the old sign-in stays (Astro F2).
       for (const state of ['expired', 'revoked', 'near_expiry']) {
         github = status(state, {flow: {...idle, status: 'failed', error: 'The sign-in was refused on GitHub.'}});
-        await page.locator('#github-check').click();
+        await reread();
         await page.waitForFunction(() => document.querySelector('#github-flow').textContent.includes('refused on GitHub'));
         assert.equal(await page.locator('#github-flow').textContent(),
           'The new GitHub sign-in failed. The sign-in was refused on GitHub. Your previous sign-in has not changed.');
       }
-      // The recovery step fits the kind of sign-in: Connect again starts an App sign-in (Astro F4).
+      // The recovery step fits the kind of sign-in: Sign in starts an App sign-in (Astro F4).
       github = status('expired', {kind: 'token'});
-      await page.locator('#github-check').click();
+      await reread();
       await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('token expired'));
       assert.match(await page.locator('#github-status').textContent(), /Create a new token on GitHub, then choose Use a token instead/);
       assert.match(await page.locator('#github-banner-text').textContent(), /Use a token instead/);
+      assert.equal(await page.locator('#github-add-repositories').isHidden(), true, 'a token has no Add repositories link');
       assert.equal(await page.locator('#github-flow').textContent(), '');
       github = status('revoked');
-      await page.locator('#github-check').click();
+      await reread();
       await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('no longer accepts this sign-in'));
-      assert.match(await page.locator('#github-status').textContent(), /Choose Connect again/);
+      assert.match(await page.locator('#github-status').textContent(), /Choose Sign in\./);
       github = status('near_expiry');
-      await page.locator('#github-check').click();
+      await reread();
       await page.waitForFunction(() => document.querySelector('#github-status').textContent.startsWith('GitHub still works'));
       assert.equal(await page.locator('#github-banner').isHidden(), true);
       github = status('ok');
-      await page.locator('#github-check').click();
+      await reread();
       await page.waitForFunction(() => document.querySelector('#github-status').textContent.startsWith('Connected to GitHub'));
 
       // Clone into /share/<repository> (the default folder name) and link existing folders, by buttons.
@@ -182,7 +191,7 @@ function status(state, extra = {}) {
       await page.locator('#github-clone').click();
       await page.waitForFunction(() => document.querySelector('#github-result').textContent === 'Cloned into /share/house.');
       assert.deepEqual(posts.at(-1), {name: 'repos/clone', body: {repository: 'synthetic-owner/house', folder: 'house'}});
-      for (const path of ['/share/existing', '/config/existing']) {
+      for (const path of ['/share/existing', '/homeassistant/existing']) {
         await page.locator('#github-link-path').fill(path);
         await page.locator('#github-link').click();
         await page.waitForFunction(text => document.querySelector('#github-result').textContent === text,
@@ -190,7 +199,7 @@ function status(state, extra = {}) {
         assert.deepEqual(posts.at(-1), {name: 'repos/link', body: {repository: 'synthetic-owner/house', path}});
       }
 
-      // Disconnect: 409 while a task runs, then the honest revoke link.
+      // Sign out: 409 while a task runs, then the honest revoke link.
       await page.locator('#github-disconnect').click();
       await page.waitForFunction(() => document.querySelector('#github-result').textContent.includes('running task'));
       await page.locator('#github-disconnect').click();
@@ -234,7 +243,7 @@ function status(state, extra = {}) {
     await page.waitForFunction(() => document.querySelector('#github-status').textContent.includes('Not available in this version'));
     assert.equal(await page.locator('#github-connect').isHidden(), true);
     await page.close();
-    console.log('PASS: GitHub card: device code on the page, cancel, poll, read test, check, accept, clone, link, ' +
-      'disconnect with the revoke link, token fallback, no secret kept, older worker.');
+    console.log('PASS: GitHub card: device code on the page, cancel, poll, Sign in and Sign out, accept, clone, link, ' +
+      'Sign out with the revoke link, token fallback, no secret kept, older worker.');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

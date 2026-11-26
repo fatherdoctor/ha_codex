@@ -74,7 +74,7 @@ class ApprovalTests(unittest.TestCase):
         """Publish a server request using its real protocol field names."""
         self.session.receive({"id": request_id, "method": method, "params": {
             "threadId": "thread", "turnId": "turn", "itemId": "item", "startedAtMs": 1,
-            "command": "curl http://homeassistant:8123/api/history/period", "cwd": "/config",
+            "command": "curl http://homeassistant:8123/api/history/period", "cwd": "/homeassistant",
             "reason": "Read sensor history", **fields,
         }})
         return self.records[-1]["approval_id"] if self.records else ""
@@ -133,7 +133,7 @@ class ApprovalTests(unittest.TestCase):
     def test_masked_command_or_working_folder_cannot_be_allowed(self):
         """Masking any executable text or working folder leaves only Deny available."""
         for index, fields in enumerate([
-            {"command": "echo secret-value"}, {"cwd": "/config/secret-value"},
+            {"command": "echo secret-value"}, {"cwd": "/homeassistant/secret-value"},
         ]):
             approval_id = self.request(request_id=index, **fields)
             self.assertFalse(self.records[-1]["can_allow"])
@@ -301,7 +301,7 @@ class ApprovalTests(unittest.TestCase):
         for request_id, method in enumerate((COMMAND_APPROVAL, FILE_APPROVAL), 7):
             with self.subTest(method=method), self.assertRaises(ValueError):
                 early.receive({"id": request_id, "method": method, "params": {
-                    "threadId": "thread", "turnId": "", "itemId": "item", "command": "ls", "cwd": "/config"}})
+                    "threadId": "thread", "turnId": "", "itemId": "item", "command": "ls", "cwd": "/homeassistant"}})
         self.assertFalse(self.records)
         self.assertFalse({7, 8} & {message.get("id") for message in early.writer.messages()})
 
@@ -623,7 +623,7 @@ class SharedConnectionTests(unittest.TestCase):
         sent = len(self.writer.messages())
         session.receive({"id": 0, "method": COMMAND_APPROVAL, "params": {
             "threadId": "live-thread", "turnId": "turn-1", "itemId": "item", "startedAtMs": 1,
-            "command": "ls /config", "cwd": "/config", "reason": "List files"}})
+            "command": "ls /homeassistant", "cwd": "/homeassistant", "reason": "List files"}})
         self.assertEqual(len(self.writer.messages()), sent)
         self.assertEqual(self.records, [])
 
@@ -634,7 +634,7 @@ class SharedConnectionTests(unittest.TestCase):
         session.receive({"id": self.writer.messages()[0]["id"], "result": {"turn": {"id": "turn-1"}}})
         session.receive({"id": 0, "method": COMMAND_APPROVAL, "params": {
             "threadId": "live-thread", "turnId": "turn-1", "itemId": "item", "startedAtMs": 1,
-            "command": "ls /config", "cwd": "/config", "reason": "List files"}})
+            "command": "ls /homeassistant", "cwd": "/homeassistant", "reason": "List files"}})
         approval_id = self.records[-1]["approval_id"]
         session.close()
         self.assertEqual(self.records[-1]["status"], "expired")
@@ -717,7 +717,7 @@ class ApprovalApiTests(unittest.TestCase):
         self.session.thread_id, self.session.turn_id = "thread", "turn"
         server.approval_sessions["task"] = self.session
         self.session.receive({"id": 10, "method": COMMAND_APPROVAL, "params": {
-            "threadId": "thread", "turnId": "turn", "itemId": "item", "command": "curl https://example.test", "cwd": "/config"}})
+            "threadId": "thread", "turnId": "turn", "itemId": "item", "command": "curl https://example.test", "cwd": "/homeassistant"}})
         self.approval_id = server.tasks["task"]["approvals"][0]["approval_id"]
         self.client = server.app.test_client()
 
@@ -754,7 +754,7 @@ class ApprovalApiTests(unittest.TestCase):
                          {"command": 1, "command_input": 0, "file_change": 0, "other": 0, "total": 1})
         self.assertEqual(self.answer().status_code, 200)
         self.session.receive({"id": 11, "method": COMMAND_APPROVAL, "params": {
-            "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "cat", "cwd": "/config",
+            "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "cat", "cwd": "/homeassistant",
             "kind": "writeStdin"}})
         self.assertEqual(server.tasks["task"]["approval_counts"],
                          {"command": 1, "command_input": 1, "file_change": 0, "other": 0, "total": 2})
@@ -781,7 +781,7 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertTrue(withdrawn.is_set())
         self.assertEqual(self.notified.call_count, 1)
         self.session.receive({"id": 11, "method": COMMAND_APPROVAL, "params": {
-            "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "curl https://example.test/2", "cwd": "/config"}})
+            "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "curl https://example.test/2", "cwd": "/homeassistant"}})
         self.assertEqual(self.notified.call_count, 2)
         self.assertEqual(self.notified.call_args.args[1]["command"], "curl https://example.test/2")
         self.assertFalse(self.notified.call_args.args[2].is_set())
@@ -809,7 +809,7 @@ class ApprovalApiTests(unittest.TestCase):
             late_alert()
             self.assertEqual(delivered, [("persistent_notification.create", "Codex task completed")])
             self.session.receive({"id": 11, "method": COMMAND_APPROVAL, "params": {
-                "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "curl https://example.test/2", "cwd": "/config"}})
+                "threadId": "thread", "turnId": "turn", "itemId": "second", "command": "curl https://example.test/2", "cwd": "/homeassistant"}})
             self.session.close()
             late_alert()
             self.assertEqual(server.tasks["task"]["approvals"][1]["status"], "expired")
@@ -818,7 +818,7 @@ class ApprovalApiTests(unittest.TestCase):
             fresh = server.create_approval_session("task", self.proc, "Read history", Path(self.temp.name) / "final", None, {}, server.DEFAULT_OPTIONS)
             fresh.thread_id, fresh.turn_id = "thread", "turn"
             fresh.receive({"id": 12, "method": COMMAND_APPROVAL, "params": {
-                "threadId": "thread", "turnId": "turn", "itemId": "third", "command": "curl https://example.test/3", "cwd": "/config"}})
+                "threadId": "thread", "turnId": "turn", "itemId": "third", "command": "curl https://example.test/3", "cwd": "/homeassistant"}})
             late_alert()
             self.assertEqual(delivered[-1], ("persistent_notification.create", "Codex needs permission"))
 
@@ -837,7 +837,7 @@ class ApprovalApiTests(unittest.TestCase):
             'curl -H "Authorization: Bearer worker-secret" https://example.test',
         ]):
             self.session.receive({"id": index, "method": COMMAND_APPROVAL, "params": {
-                "threadId": "thread", "turnId": "turn", "itemId": "masked", "command": command, "cwd": "/config"}})
+                "threadId": "thread", "turnId": "turn", "itemId": "masked", "command": command, "cwd": "/homeassistant"}})
             record = server.tasks["task"]["approvals"][-1]
             self.approval_id = record["approval_id"]
             self.assertFalse(record["can_allow"])
@@ -849,7 +849,7 @@ class ApprovalApiTests(unittest.TestCase):
         """A visible environment reference needs no literal credential in the approval."""
         self.session.receive({"id": 11, "method": COMMAND_APPROVAL, "params": {
             "threadId": "thread", "turnId": "turn", "itemId": "env-command",
-            "command": 'curl -H "Authorization: Bearer $HA_TOKEN" https://example.test', "cwd": "/config"}})
+            "command": 'curl -H "Authorization: Bearer $HA_TOKEN" https://example.test', "cwd": "/homeassistant"}})
         record = server.tasks["task"]["approvals"][-1]
         self.assertTrue(record["can_allow"])
         self.approval_id = record["approval_id"]
@@ -867,17 +867,17 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertEqual(self.session.thread_params["approvalsReviewer"], "user")
         self.assertNotIn("outputSchema", self.session.turn_params)
         self.assertEqual(self.session.turn_params["sandboxPolicy"], {
-            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/config", "/share"]})
+            "type": "workspaceWrite", "networkAccess": False, "writableRoots": ["/homeassistant", "/share", "/media", "/media/.agents", "/addon_config"]})
         self.assertFalse(server.protected_policy.policy_problem({}))
         self.assertFalse(server.protected_policy.policy_problem({"codex_sandbox": "read-only"}))
         # A refused mode never reaches Codex: run_task stops it before launch.
         self.assertTrue(server.protected_policy.policy_problem({"codex_sandbox": "danger-full-access"}))
 
     def test_a_task_can_write_under_share_but_never_the_github_folder(self):
-        """Owner ruling 2026-11-16: /share is writable like /config; /data/github never is, and read-only stays read-only."""
+        """Owner ruling 2026-11-16: /share is writable like /homeassistant; /data/github never is, and read-only stays read-only."""
         roots = self.session.turn_params["sandboxPolicy"]["writableRoots"]
         self.assertIn("/share", roots)
-        self.assertIn("/config", roots)
+        self.assertIn("/homeassistant", roots)
         self.assertFalse([root for root in roots if "/data/github".startswith(root.rstrip("/") + "/") or root.startswith("/data")])
         reader = server.create_approval_session("task", self.proc, "Read history", Path(self.temp.name) / "final", None, {},
                                                 {**server.DEFAULT_OPTIONS, "codex_sandbox": "read-only"})
@@ -909,7 +909,7 @@ class ApprovalApiTests(unittest.TestCase):
         session.thread_id, session.turn_id = "thread", "turn"
         session.receive({"id": 12, "method": COMMAND_APPROVAL, "params": {
             "threadId": "thread", "turnId": "turn", "itemId": "secret-command",
-            "command": "echo configured-private-token worker-secret --password 'private password'", "cwd": "/config"}})
+            "command": "echo configured-private-token worker-secret --password 'private password'", "cwd": "/homeassistant"}})
         audit = json.dumps(server.tasks["task"]["approvals"])
         self.assertNotIn("configured-private-token", audit)
         self.assertNotIn("worker-secret", audit)
@@ -1090,7 +1090,7 @@ class ApprovalRunTests(unittest.TestCase):
                                 "error": {"message": "Model stopped after editing"} if failure == "failed" else None}}})
                     else:
                         emit({"id": 0, "method": COMMAND_APPROVAL, "params": {
-                            "threadId": "019fc242-910a-7c92-a17d-54c014e19fc4", "turnId": "native-turn", "itemId": "command", "command": "curl https://example.test", "cwd": "/config"}})
+                            "threadId": "019fc242-910a-7c92-a17d-54c014e19fc4", "turnId": "native-turn", "itemId": "command", "command": "curl https://example.test", "cwd": "/homeassistant"}})
                 elif "result" in message:
                     emit({"method": "item/completed", "params": {"threadId": "019fc242-910a-7c92-a17d-54c014e19fc4",
                         "turnId": "native-turn", "item": {"id": "final", "type": "agentMessage", "phase": "final_answer",

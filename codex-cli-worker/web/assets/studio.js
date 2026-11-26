@@ -245,6 +245,7 @@ $("workspace-open").onclick = async () => {
   $("workspace-result").textContent = "Loading…";
   try {
     const data = await api("agents");
+    $("builtin-text").textContent = data.builtin || "";
     $("agents").value = data.content || "";
     $("agents").disabled = $("save-agents").disabled = false;
     $("workspace-result").textContent = "";
@@ -297,7 +298,7 @@ $("archive-list").onclick = async () => {
   try { await loadList(); } catch (error) { sidebarError(error); }
 };
 
-/** Follow Home Assistant's theme now and whenever it changes (haTheme() is in chat.js). */
+/** Follow Home Assistant's theme now and whenever it changes (haTheme() is in chat-core.js). */
 haTheme();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", haTheme);
 try {

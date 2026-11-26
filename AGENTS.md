@@ -26,6 +26,8 @@ the version.
   Verification checks workflow, and CONTRIBUTING.md says how to run them by hand.
 - Run: only inside Home Assistant OS or Supervised, by a person; `python codex-cli-worker/tests/web_fixture.py`
   serves the chat page alone on port 9137 with temporary data, without Home Assistant or Codex.
+- Code checks: `python scripts/code_checks.py` - green ends `code_checks: ok (...)`, exit 0; the warning line it
+  prints is not a failure. `test_code_checks.py` runs it inside the suite.
 - Before a push: the full `pytest` run, or the worker-only run when 3.14 is not at hand (say which in the PR).
 
 ## Layout
@@ -37,10 +39,19 @@ the version.
 | `codex-cli-worker/web/` | the chat page (plain JavaScript and CSS, no build step) |
 | `codex-cli-worker/tests/` | every test: `test_*.py`, the Home Assistant tests in `ha/`, browser checks `browser_*.cjs` |
 | `custom_components/codex_cli/` | the integration; `manifest.json` holds its version |
-| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback), `check_unreferenced_images.py` |
+| `scripts/` | `build_hacs_release.py`, `fork_release.py` (tag after a lab pass, rollback), `check_unreferenced_images.py`, `code_checks.py` (file size, globals by name) |
 | `docs/` | `app-reference.md`, `updates-and-rollback.md`, design notes under `design/` |
 | `ci/` | workflow files staged for the maintainer to copy into `.github/workflows/` |
 | `examples/`, `screenshots/` | the example script; the screenshots, which `screenshots/SCREENSHOTS.md` says how to retake |
+
+## Copy this
+
+Files that meet the code standard, to copy when you write something like them. Each later refactor pull request that
+lands a clean module adds one line here; code that misses the standard is never listed.
+
+- `codex-cli-worker/task_store.py` - a store that owns its state and its lock, takes what it needs from the rest of
+  the worker as arguments, and holds the one atomic JSON writer (`atomic_json_write`) that the rest of the worker
+  writes `task.json` through; its tests are in `codex-cli-worker/tests/test_task_store.py`.
 
 ## Rules
 
@@ -54,8 +65,10 @@ the version.
 - A pull request follows `.github/pull_request_template.md` and stays a draft until it is ready for review.
 - Every pull request gets an independent adversarial review before it merges; each finding is fixed, or declined
   in writing with the reason.
-- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/config` states its
+- A change to permissions, approvals, sign-in, the sandbox, remote control or writes under `/homeassistant` states its
   safety reasoning in the pull request and comes with tests that fail without it.
+- No directory restriction (a folder hidden, read-only or not writable in the sandbox) unless it has been checked
+  against what the Claude Code add-on allows today; the app aims at the same file access. Say the check in the PR.
 - Keep the pins: the base image by digest, the packaged Codex CLI by version and checksum, no self-update
   (`codex-cli-worker/tests/test_fork_pins.py` checks them). Moving a pin is its own pull request.
 - The app and the integration carry one version: `codex-cli-worker/config.yaml` and `manifest.json` change
@@ -68,6 +81,22 @@ the version.
 - Tests and fixtures use invented data only: no real tokens, device codes, logs or Home Assistant configuration.
 - Keep the fork's differences from upstream small and separate, so an upstream release can still be merged.
 
+## Code standard
+
+Five rules for every change. `scripts/code_checks.py` checks rules 2 and 4; review checks the rest.
+
+1. Delete before you move: remove dead code and old paths first, then move or split what is left.
+2. No source file past 1,000 lines unless `SIZE_EXEMPT` in `scripts/code_checks.py` lists it with the reason. The
+   pull request that brings a listed file under the limit removes its entry.
+3. No special case bolted into a busy function: give the case its own function, or change the design that needs it.
+4. No helper that hands out any module global by name (`globals()[name]` in a `__getattr__` and the like): name the
+   global, or pass the object it needs.
+5. One model for each concept: one outcome type, one Home Assistant client, one transport, not a second copy beside
+   the first.
+
+The full strict review against these rules runs at milestones (each release, and before a large refactor), not on
+each pull request; tests that patch names inside `server.py` are counted as a warning, and the count should go down.
+
 ## Release
 
 No stable release yet. The image build workflow publishes the app image for each version, and tag `v0.3.6` exists.
@@ -77,7 +106,12 @@ When one is:
 1. In a pull request titled `Release <version>`, set the same version in `codex-cli-worker/config.yaml` and
    `custom_components/codex_cli/manifest.json`; a version has three numbers. A beta is `<three numbers>-beta.<n>`,
    made on the `beta` branch for the test machine only
-   ([Versions](docs/updates-and-rollback.md#versions)).
+   ([Versions](docs/updates-and-rollback.md#versions)). From 0.6 the largest change sets the number: a minor
+   (0.x.0) adds a feature area or screen, removes or renames something an owner uses, moves the owner's data, or
+   changes what Codex may do; a patch (0.x.y) only fixes, tidies or explains, and may add a small option that restores
+   or completes what the minor already has. The first release a stranger may install with no help from us is 1.0
+   (the refactor is done, the release steps passed twice in a row, the public README is the only guide needed); after
+   1.0 a breaking change takes the major number. 0.5.1 keeps its name.
 2. The version passes on a Home Assistant OS test machine, and its lab-pass record is committed.
 3. The commit that removes `(unreleased)` from the changelog heading is the one tagged, by the maintainer, with
    `python scripts/fork_release.py tag <version> --push`; the release workflow then builds the images and the HACS ZIP.

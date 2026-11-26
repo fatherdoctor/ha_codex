@@ -109,7 +109,7 @@ class RuntimeDiagnosticsTests(unittest.TestCase):
                     'threadId': 'synthetic-thread',
                     'turnId': 'synthetic-turn',
                     'command': 'echo sample',
-                    'cwd': '/config',
+                    'cwd': '/homeassistant',
                     # The approval explanation is private prose, not an exported rule.
                     'reason': 'PRIVATE_REASON_CANARY',
                 },

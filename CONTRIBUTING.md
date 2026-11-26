@@ -4,7 +4,7 @@ Thank you for your interest in improving Codex for Home Assistant.
 
 This project has two main parts:
 
-- `codex-cli-worker`: the Home Assistant app/add-on that runs Codex CLI tasks against `/config`.
+- `codex-cli-worker`: the Home Assistant app/add-on that runs Codex CLI tasks against `/homeassistant`.
 - `custom_components/codex_cli`: the Home Assistant custom integration that exposes entities, actions, diagnostics, and setup flow support.
 
 Contributions are welcome, including bug reports, documentation improvements, compatibility fixes, security hardening, and feature ideas.
@@ -71,7 +71,7 @@ examples/                      Example Home Assistant scripts
 For local Home Assistant testing, install or copy the integration into:
 
 ```text
-/config/custom_components/codex_cli
+/homeassistant/custom_components/codex_cli
 ```
 
 For worker app testing, add this repository as a Home Assistant app repository. To use a development branch, append `#branch-name` to the repository URL. That branch selection applies only to the worker app; install integration changes from the branch manually.
@@ -107,7 +107,14 @@ For the worker's standalone Python tests, without the Home Assistant pytest fixt
 python -m unittest discover -s codex-cli-worker/tests -v
 ```
 
-The tests never write under the app's real folders (`/data`, `/config`, `/addon_config`): under `pytest`, `codex-cli-worker/tests/conftest.py` fails a test that does, and `test_no_real_data_root.py` checks the chat tests in a plain `unittest` run. An older test run as root could leave `/data/schedules.sqlite3` behind, and that file makes the sandbox tests in `test_bwrap.py` and `test_cx_pair_f.py` fail. The tests do not remove it for you: if a `/data` folder is left over from such a run on a test machine (never on an install), remove it by hand before you run the suite.
+The tests never write under the app's real folders (`/data`, `/homeassistant`, `/addon_config`, and `/config`, the folder of versions before 0.6): under `pytest`, `codex-cli-worker/tests/conftest.py` fails a test that does, and `test_no_real_data_root.py` checks the chat tests in a plain `unittest` run. An older test run as root could leave `/data/schedules.sqlite3` behind, and that file makes the sandbox tests in `test_bwrap.py` and `test_cx_pair_f.py` fail. The tests do not remove it for you: if a `/data` folder is left over from such a run on a test machine (never on an install), remove it by hand before you run the suite.
+
+The suite includes `test_code_checks.py`, which runs `python scripts/code_checks.py` against the repository. You can
+also run that script alone; it needs only the standard library and takes about a second. It fails when a source file
+grows past 1,000 lines without an entry in its exemption list, or when Python code reads a module global by a
+computed name (`globals()[name]` and the like). It also prints, as a warning only, how many places in the tests patch
+a name inside `server.py`. The five rules behind these checks are listed under "Code standard" in `AGENTS.md`.
+
 
 For a local chat UI check, start `python codex-cli-worker/tests/web_fixture.py`, redirecting its output to a file, then run `node codex-cli-worker/tests/browser_smoke.cjs` in another terminal with Playwright on `NODE_PATH`. Set `CODEX_CHAT_BROWSER=msedge` to use installed Edge when Playwright's Chromium is unavailable. The fixture uses temporary data and never contacts Home Assistant or starts Codex. Stop it after testing and before starting another instance on port 9137. The smoke check also runs `browser_reply_layout.cjs`, which measures five transcript-shaped replies (`tests/fixtures/reply-layout/transcripts.json`) at four widths; by hand, `REPLY_LAYOUT_CAPTURE=<folder> node codex-cli-worker/tests/browser_reply_layout.cjs` writes one image of each, `REPLY_LAYOUT_BASE` sets the preview URL, and `REPLY_LAYOUT_MUTATE_GAP=1` adds a 24 px gap that the check must reject. See [verification checks](codex-cli-worker/VERIFICATION.md#validation) and [sandbox checks](codex-cli-worker/SANDBOX_TESTING.md) for those features.
 
@@ -146,7 +153,7 @@ Please be especially careful with changes involving:
 - Authentication or token handling.
 - Home Assistant Supervisor or Core API calls.
 - Ingress validation.
-- File writes under `/config`.
+- File writes under `/homeassistant`.
 - Task execution, cancellation, and user replies.
 - AppArmor, container permissions, networking, or mounted paths.
 

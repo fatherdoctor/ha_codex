@@ -11,8 +11,9 @@ import sqlite3
 import threading
 import time
 import uuid
-from typing import NamedTuple
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
+from typing import Any, NamedTuple, Protocol
 from zoneinfo import ZoneInfo
 
 # Build-time switch for scheduled runs. While it is True (the 0.4 series), the pages offer schedules, Codex gets
@@ -29,8 +30,10 @@ MAX_RUNS = 500
 OWNER_FIELDS = frozenset({'chat_id', 'model'})
 CHAT_ID = re.compile(r'(?:[A-Za-z0-9][A-Za-z0-9._-]{0,127})?')
 MODEL_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}')
+
+
 class Busy(ValueError):
-    pass
+    """The worker is running other work, so a due schedule waits and stays due."""
 
 
 class Placed(NamedTuple):
@@ -42,20 +45,39 @@ class Placed(NamedTuple):
 ACTIVE = ('reserved', 'queued', 'running', 'waiting_for_approval', 'waiting_for_input')
 
 
-def text(value, label, limit):
+class TaskRunner(Protocol):
+    """What the Engine uses to start and follow a scheduled run's task.
+
+    schedule_api.Worker gives this for the add-on. The Engine also reads an optional `dispatch_slot()` context
+    manager with getattr, so a runner without one (such as a test double) still works.
+    """
+
+    def busy(self) -> bool: ...
+    def snapshot(self, task_id: str) -> dict[str, Any] | None: ...
+    def submit(self, task_id: str, prompt: str, mode: str, name: str, schedule_id: str,
+               model: str | None = None, chat_id: str = '') -> Placed: ...
+
+
+def text(value: Any, label: str, limit: int) -> str:
+    """Return the value stripped, or refuse it when it is not text, is blank or is longer than the limit."""
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ValueError(f'{label} must be nonempty text, at most {limit} characters.')
     return value.strip()
 
 
-def cron_fields(expression):
+def cron_fields(expression: Any) -> tuple[list[set[int]], bool, bool]:
+    """Parse five numeric cron fields into their sets of values.
+
+    Return the minute, hour, day, month and weekday sets (Sunday is 0), and whether the day-of-month and the weekday
+    fields start with a wildcard; cron matches either day field only when neither does.
+    """
     expression = text(expression, 'cron', 256)
     parts = expression.split()
     if len(parts) != 5:
         raise ValueError('Use five numeric cron fields: minute hour day month weekday (Home Assistant time).')
-    fields = []
+    fields: list[set[int]] = []
     for part, low, high in zip(parts, (0, 0, 1, 1, 0), (59, 23, 31, 12, 7)):
-        values = set()
+        values: set[int] = set()
         for item in part.split(','):
             base, *steps = item.split('/')
             if len(steps) > 1 or (steps and (not steps[0].isdigit() or int(steps[0]) < 1)):
@@ -81,7 +103,7 @@ def cron_fields(expression):
     return fields, parts[2].startswith('*'), parts[4].startswith('*')
 
 
-def local_timestamp(date, zone):
+def local_timestamp(date: datetime, zone: str) -> float:
     """Use the first repeated occurrence and reject nonexistent local wall times."""
     aware = date.replace(tzinfo=ZoneInfo(zone), fold=0)
     stamp = aware.timestamp()
@@ -90,8 +112,11 @@ def local_timestamp(date, zone):
     return stamp
 
 
-def next_due(spec, after, zone='UTC'):
-    """Cron follows Home Assistant wall time; repeated minutes run only once."""
+def next_due(spec: dict[str, Any], after: float, zone: str = 'UTC') -> float | None:
+    """Return the first time after `after` when the schedule is due, or None when a one-off time has passed.
+
+    Cron follows Home Assistant wall time; repeated minutes run only once.
+    """
     if spec['kind'] == 'once':
         return spec['at'] if spec['at'] > after else None
     if spec['kind'] == 'interval':
@@ -117,14 +142,46 @@ def next_due(spec, after, zone='UTC'):
     raise ValueError('Cron has no occurrence in the next 366 days.')
 
 
-def owner_fields(payload):
+def starts_approved(owner: bool, spec: dict[str, Any]) -> bool:
+    """Return whether a schedule runs without the owner's approval.
+
+    The owner's own schedules run as saved. A one-time wakeup that Codex
+    proposes runs once, at its time, as the next message in the chat it came
+    from, and that run asks for permission like any other. A repeating proposal
+    waits for the owner, because it would go on running by itself.
+    """
+    return owner or spec['kind'] == 'once'
+
+
+# A one-time schedule that ran is off with no next run; it cannot run again until the owner edits it, so it does
+# not use up a place under MAX_SCHEDULES (otherwise every wakeup Codex ever set would fill the owner's room).
+SPENT = "enabled=0 AND next_due IS NULL AND json_extract(spec, '$.kind')='once'"
+# Codex's list_schedules pages end here. Rows that are not spent are at most this many (MAX_SCHEDULES approved
+# plus MAX_PROPOSALS), and Store.schedules() puts them first, so spent history can never push one past the end.
+LISTED = MAX_SCHEDULES + MAX_PROPOSALS
+
+
+def counted(db: sqlite3.Connection, approved: int, schedule_id: str = '') -> int:
+    """Return how many schedules hold a place under the limit of their kind (approved or proposals)."""
+    return db.execute(f'SELECT count(*) FROM schedules WHERE approved=? AND id!=? AND NOT ({SPENT})',
+                      (approved, schedule_id)).fetchone()[0]
+
+
+def local_text(stamp: float, zone: str) -> str:
+    """Say a time in the home's time zone, for example 'Tuesday, November 24, 2026 at 6:50 PM CST'."""
+    moment = datetime.fromtimestamp(stamp, ZoneInfo(zone))
+    hour = moment.hour % 12 or 12
+    return f'{moment:%A, %B} {moment.day}, {moment.year} at {hour}:{moment:%M %p %Z}'
+
+
+def owner_fields(payload: dict[str, Any]) -> dict[str, Any]:
     """Return the chat and model an owner's request names; a field left out is left out.
 
     Only the owner's editor sets these. The chat is where the schedule was made,
     so the page can show it there. The model is None for the add-on's own model;
     schedule_api checks a named one against the models the worker offers.
     """
-    fields = {}
+    fields: dict[str, Any] = {}
     if 'chat_id' in payload:
         chat_id = payload['chat_id']
         if not isinstance(chat_id, str) or CHAT_ID.fullmatch(chat_id) is None:
@@ -138,7 +195,12 @@ def owner_fields(payload):
     return fields
 
 
-def validate(payload, now, zone="UTC", *, owner=False):
+def validate(payload: Any, now: float, zone: str | None = "UTC", *, owner: bool = False) -> dict[str, Any]:
+    """Check a schedule request and return its clean name, prompt, mode, spec and next due time.
+
+    An owner's request may also name the chat and the model; Codex's may not. A refusal is a ValueError whose text
+    says why.
+    """
     allowed = {'name', 'prompt', 'mode', 'spec'}
     if not isinstance(payload, dict) or set(payload) - (allowed | OWNER_FIELDS if owner else allowed):
         raise ValueError('A schedule accepts only name, prompt, mode, spec, model and chat_id.' if owner
@@ -153,7 +215,7 @@ def validate(payload, now, zone="UTC", *, owner=False):
     mode = payload.get('mode', 'default')
     if mode not in ('default', 'read-only'):
         raise ValueError('Mode must be default or read-only.')
-    spec = payload.get('spec')
+    spec: Any = payload.get('spec')
     if not isinstance(spec, dict):
         raise ValueError('spec must describe interval, cron or once.')
     kind = spec.get('kind')
@@ -191,7 +253,7 @@ RUNS_COLUMNS = """
                     error TEXT NOT NULL DEFAULT '', turn_id TEXT NOT NULL DEFAULT ''"""
 
 
-def upgrade_runs(db):
+def upgrade_runs(db: sqlite3.Connection) -> None:
     """Upgrade a run log of schema version 3 or earlier (0.4 and before) to version 4.
 
     Version 3 held task_id UNIQUE, one new chat per run. SQLite cannot drop that
@@ -207,7 +269,7 @@ def upgrade_runs(db):
     db.execute('DROP TABLE runs_version_3')
 
 
-def run_status(task, turn_id):
+def run_status(task: dict[str, Any], turn_id: str) -> str:
     """Return a run's status as its chat records it.
 
     A run that later messages followed has ended: its exchange keeps its own
@@ -225,7 +287,9 @@ def run_status(task, turn_id):
 
 class Store:
     """Transactions protect occurrence reservation and owner approval from concurrent edits."""
-    def __init__(self, path, zone="UTC"):
+
+    def __init__(self, path: str | os.PathLike[str], zone: str | None = "UTC") -> None:
+        """Open or make the schedules database, owner-only, and save the Home Assistant time zone when known."""
         self.timezone = zone
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -258,7 +322,8 @@ class Store:
         if zone is not None:
             self.set_timezone(zone, time.time())
 
-    def set_timezone(self, zone, now):
+    def set_timezone(self, zone: str, now: float) -> None:
+        """Save the Home Assistant time zone; when it changed, recompute the next due time of each enabled cron."""
         ZoneInfo(zone)
         with self.connect() as db:
             previous = db.execute("SELECT value FROM settings WHERE key='ha_timezone'").fetchone()
@@ -272,7 +337,8 @@ class Store:
         self.timezone = zone
 
     @contextlib.contextmanager
-    def connect(self):
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection inside one immediate transaction: commit on success, roll back on any error."""
         db = sqlite3.connect(self.path, timeout=5)
         db.row_factory = sqlite3.Row
         if db.execute('PRAGMA journal_mode').fetchone()[0] != 'persist':
@@ -288,21 +354,26 @@ class Store:
             db.close()
 
     @staticmethod
-    def schedule(row):
+    def schedule(row: sqlite3.Row) -> dict[str, Any]:
+        """Return a saved schedule row as a dict, with its spec decoded and its flags as bools."""
         value = dict(row); value['spec'] = json.loads(value['spec'])
         value['approved'] = bool(value['approved']); value['enabled'] = bool(value['enabled'])
         return value
 
-    def schedules(self):
+    def schedules(self) -> list[dict[str, Any]]:
+        """Return every schedule: active ones and proposals first, then spent one-time wakeups, newest first in each."""
         with self.connect() as db:
-            return [self.schedule(row) for row in db.execute('SELECT * FROM schedules ORDER BY updated DESC, id')]
+            return [self.schedule(row) for row in db.execute(f'SELECT * FROM schedules ORDER BY ({SPENT}), updated DESC, id')]
 
-    def save(self, payload, *, owner, now, schedule_id=None, author=None, made_in=None):
-        """Save a schedule; made_in is the chat a Codex proposal came from.
+    def save(self, payload: Any, *, owner: bool, now: float, schedule_id: str | None = None,
+             author: str | None = None, made_in: str | None = None) -> dict[str, Any]:
+        """Save an owner's schedule or a Codex proposal, and return the saved row.
 
-        The worker sets made_in from the exchange that sent the proposal, never
-        from Codex's arguments, so the run of a proposal continues that chat as
-        a schedule the owner makes in a chat does.
+        An owner's schedule is saved approved and enabled; a proposal is too only when starts_approved says so (a
+        one-time wakeup). With schedule_id, an owner's edit replaces that schedule; Codex cannot edit. made_in is
+        the chat a Codex proposal came from: the worker sets it from the exchange that sent the proposal, never
+        from Codex's arguments, so the run of a proposal continues that chat as a schedule the owner makes in a
+        chat does.
         """
         value = validate(payload, now, self.timezone, owner=owner)
         if made_in is not None:
@@ -317,11 +388,10 @@ class Store:
             old = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone() if schedule_id else None
             if schedule_id and old is None:
                 raise LookupError('Schedule not found.')
-            approved = int(owner)
-            cap = MAX_SCHEDULES if owner else MAX_PROPOSALS
-            count = db.execute('SELECT count(*) FROM schedules WHERE approved=? AND id!=?', (approved, schedule_id or '')).fetchone()[0]
-            if count >= cap:
-                raise ValueError('Approved schedule limit reached.' if owner else 'Proposal limit reached.')
+            approved = int(starts_approved(owner, value['spec']))
+            cap = MAX_SCHEDULES if approved else MAX_PROPOSALS
+            if counted(db, approved, schedule_id or '') >= cap:
+                raise ValueError('Approved schedule limit reached.' if approved else 'Proposal limit reached.')
             schedule_id = schedule_id or uuid.uuid4().hex
             # An edit that does not name the chat or the model keeps the saved one.
             chat_id = value.get('chat_id', old['chat_id'] if old else '')
@@ -331,7 +401,8 @@ class Store:
                 approved, approved, value['next_due'], now, uuid.uuid4().hex, author, chat_id, model))
             return self.schedule(db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone())
 
-    def action(self, schedule_id, action, now, revision=None):
+    def action(self, schedule_id: str, action: str, now: float, revision: str | None = None) -> None:
+        """Approve, pause, resume or delete a schedule; approval needs the revision the owner reviewed."""
         with self.connect() as db:
             row = db.execute('SELECT * FROM schedules WHERE id=?', (schedule_id,)).fetchone()
             if row is None:
@@ -342,7 +413,7 @@ class Store:
                 raise ValueError('Unknown schedule action.')
             if action == 'approve' and revision != row['revision']:
                 raise ValueError('This proposal changed. Refresh and review it before approving.')
-            if action == 'approve' and not row['approved'] and db.execute('SELECT count(*) FROM schedules WHERE approved=1').fetchone()[0] >= MAX_SCHEDULES:
+            if action == 'approve' and not row['approved'] and counted(db, 1) >= MAX_SCHEDULES:
                 raise ValueError('Approved schedule limit reached.')
             approved = bool(row['approved']) or action == 'approve'
             if action == 'resume' and not approved:
@@ -355,7 +426,7 @@ class Store:
             db.execute('UPDATE schedules SET approved=?,enabled=?,next_due=?,updated=?,revision=? WHERE id=?',
                        (int(approved), int(action != 'pause'), due, now, uuid.uuid4().hex, schedule_id))
 
-    def reserve(self, now, schedule_id):
+    def reserve(self, now: float, schedule_id: str) -> dict[str, Any] | None:
         """Claim before dispatch. Missing tasks after a crash become interrupted, never retried."""
         with self.connect() as db:
             row = db.execute('SELECT * FROM schedules WHERE id=? AND approved=1 AND enabled=1 AND next_due<=?',
@@ -380,7 +451,7 @@ class Store:
             db.execute('UPDATE schedules SET next_due=?,enabled=? WHERE id=?', (following, int(following is not None), schedule_id))
             return {'id': run_id, 'task_id': task_id, 'schedule': self.schedule(row)}
 
-    def defer(self, run):
+    def defer(self, run: dict[str, Any]) -> None:
         """Undo a busy reservation without overwriting a concurrent owner edit."""
         with self.connect() as db:
             schedule = run['schedule']
@@ -388,35 +459,40 @@ class Store:
                        (schedule['next_due'], schedule['id'], schedule['revision']))
             db.execute("UPDATE runs SET status='deferred',error='Worker became busy; occurrence remains due.' WHERE id=?", (run['id'],))
 
-    def started(self, run_id, placed):
+    def started(self, run_id: str, placed: Placed) -> None:
         """Record the chat and exchange the worker started a reserved run in."""
         with self.connect() as db:
             db.execute("UPDATE runs SET task_id=?,turn_id=?,status='queued' WHERE id=?",
                        (placed.task_id, placed.turn_id, run_id))
 
-    def follow_chat(self, schedule_id, old_chat, new_chat):
+    def follow_chat(self, schedule_id: str, old_chat: str, new_chat: str) -> None:
         """Move a schedule to the chat that replaced its own, unless the owner changed the chat meanwhile."""
         with self.connect() as db:
             db.execute('UPDATE schedules SET chat_id=? WHERE id=? AND chat_id=?', (new_chat, schedule_id, old_chat))
 
-    def finish(self, run_id, status, error=''):
+    def finish(self, run_id: str, status: str, error: str = '') -> None:
+        """Record a run's status and error, and keep only the newest MAX_RUNS finished runs."""
         with self.connect() as db:
             db.execute('UPDATE runs SET status=?,error=? WHERE id=?', (status, error[:500], run_id))
             db.execute('''DELETE FROM runs WHERE id IN (
                 SELECT id FROM runs WHERE status NOT IN ('reserved','queued','running','waiting_for_approval','waiting_for_input')
                 ORDER BY created DESC, id DESC LIMIT -1 OFFSET ?)''', (MAX_RUNS,))
 
-    def runs(self):
+    def runs(self) -> list[dict[str, Any]]:
+        """Return the run log, newest first."""
         with self.connect() as db:
             return [dict(row) for row in db.execute('SELECT * FROM runs ORDER BY created DESC,id DESC LIMIT 600')]
 
+
 class Engine:
     """One scheduler tick dispatches at most one ordinary task, never native decisions."""
-    def __init__(self, store, worker):
+
+    def __init__(self, store: Store, worker: TaskRunner) -> None:
         self.store = store; self.worker = worker
         self.tick_lock = threading.Lock()
 
-    def reconcile(self):
+    def reconcile(self) -> None:
+        """Copy each unfinished run's task status into the run log; a run whose task is gone becomes interrupted."""
         for run in self.store.runs():
             if run['status'] in ACTIVE:
                 task = self.worker.snapshot(run['task_id'])
@@ -425,12 +501,13 @@ class Engine:
                 else:
                     self.store.finish(run['id'], run_status(task, run.get('turn_id', '')))
 
-    def submit(self, run, prompt, mode, name):
+    def submit(self, run: dict[str, Any], prompt: str, mode: str, name: str) -> str:
         """Start a reserved run; return the chat it runs in.
 
         A schedule made in a chat runs in that chat. When the worker had to use a
         new chat instead (the old one was deleted, archived or cannot go on), the
-        schedule follows the new chat, so its later runs continue there.
+        schedule follows the new chat, so its later runs continue there. A busy
+        worker defers the run; any other refusal fails it.
         """
         schedule = run['schedule']
         # A schedule with no model or chat of its own starts exactly as before.
@@ -453,7 +530,8 @@ class Engine:
             self.store.follow_chat(schedule['id'], own['chat_id'], placed.task_id)
         return placed.task_id
 
-    def tick(self, now=None):
+    def tick(self, now: float | None = None) -> None:
+        """Run one scheduler pass, unless another pass holds the tick lock."""
         if not self.tick_lock.acquire(blocking=False):
             return
         try:
@@ -465,7 +543,8 @@ class Engine:
         finally:
             self.tick_lock.release()
 
-    def dispatch_due(self, now):
+    def dispatch_due(self, now: float) -> None:
+        """Start the earliest due schedule, at most one per pass, when the worker is free."""
         if not SCHEDULED_RUNS or self.worker.busy():
             return
         for schedule in sorted(self.store.schedules(), key=lambda s: s['next_due'] or float('inf')):

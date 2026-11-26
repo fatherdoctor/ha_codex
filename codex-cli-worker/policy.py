@@ -1,14 +1,15 @@
 """The protected permission policy: what the worker allows, read from a file Codex cannot edit.
 
-The policy ships inside the app image (read-only, outside /config and outside
+The policy ships inside the app image (read-only, outside /homeassistant and outside
 every sandbox's writable roots). The worker reads it at startup and before
-every exchange. Nothing in /config, the app options or a chat message can
+every exchange. Nothing in /homeassistant, the app options or a chat message can
 loosen it: a setting the policy does not allow stops the worker at startup and
 refuses each task with a "needs support" state.
 
 Owner instructions live in the app's own folder, /addon_config/AGENTS.md; no house
 rules ship with the app. The starter text a new install gets there (server.py: write_starter_agents_file)
-is an owner file from then on and is not part of this policy.
+is an owner file from then on, and the built-in instructions (builtin_instructions.md) are text
+for Codex; neither is part of this policy.
 """
 
 from __future__ import annotations

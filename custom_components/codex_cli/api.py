@@ -30,15 +30,6 @@ class CodexCliApiClient:
         self._base_url = base_url.rstrip("/")
         self._api_token = api_token
 
-    @property
-    def base_url(self) -> str:
-        """Return the configured worker URL."""
-        return self._base_url
-
-    async def health(self) -> dict[str, Any]:
-        """Fetch worker health: the Codex binary, version and login, and sandbox readiness."""
-        return await self._request("GET", "/health")
-
     async def status(self) -> dict[str, Any]:
         """Fetch authenticated worker status."""
         return await self._request("GET", "/status")

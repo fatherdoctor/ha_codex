@@ -22,6 +22,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable
 
+from app_paths import CONFIG_ROOT
+
 # The Client ID of the public GitHub App "Codex for Home Assistant". It is public by design (GitHub's device
 # sign-in needs nothing else); the add-on option `github_client_id` overrides it for an owner's own App.
 # "Codex for Home Assistant", registered under fatherdoctor; no client secret or private key exists.
@@ -36,6 +38,9 @@ ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
 DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 APP_REVOKE_URL = "https://github.com/settings/apps/authorizations"
 TOKEN_REVOKE_URL = "https://github.com/settings/tokens"
+# GitHub's own pages start here. An App installation's Configure page (its html_url) is where the owner adds
+# repositories; the page links to it only when GitHub gave an address on github.com.
+GITHUB_WEB = "https://github.com/"
 HTTP_TIMEOUT = 10
 GIT_TIMEOUT_SECONDS = 300
 GIT_STALL_SECONDS = 60
@@ -323,6 +328,20 @@ def _repo_entry(item: dict[str, Any]) -> dict[str, Any] | None:
     return {"full_name": name, "private": bool(item.get("private")), "push": bool(permissions.get("push"))}
 
 
+def configure_url(installation: dict[str, Any]) -> str:
+    """The installation's Configure page on github.com, where its owner picks the repositories; "" if none."""
+    url = installation.get("html_url")
+    return url if isinstance(url, str) and url.startswith(GITHUB_WEB) and len(url) <= 300 else ""
+
+
+def add_repositories_url(state: dict[str, Any]) -> str:
+    """The first stored installation's Configure page, for the page's Add repositories link; "" if none."""
+    for installation in state.get("installations") or []:
+        if isinstance(installation, dict) and configure_url({"html_url": installation.get("configure_url")}):
+            return installation["configure_url"]
+    return ""
+
+
 def inspect_access(http, token: str, kind: str, token_repository: str | None = None) -> dict[str, Any]:
     """Read what the credential reaches now. Raises Revoked on a 401, Unreachable on a network error.
 
@@ -350,7 +369,8 @@ def inspect_access(http, token: str, kind: str, token_repository: str | None = N
                     continue
                 inst_permissions = installation.get("permissions") if isinstance(installation.get("permissions"), dict) else {}
                 live["installations"].append({"id": inst_id, "account": str((installation.get("account") or {}).get("login") or ""),
-                                              "permissions": dict(inst_permissions)})
+                                              "permissions": dict(inst_permissions),
+                                              "configure_url": configure_url(installation)})
                 for name, level in inst_permissions.items():
                     permissions[str(name)] = str(level)
                 for item in _paged(http, f"{API}/user/installations/{inst_id}/repositories", token, key="repositories"):
@@ -519,10 +539,10 @@ class DeviceFlow:
 
 
 class GitRunner:
-    """Run git for the agent with the stored credential, only in a checked repository under /config."""
+    """Run git for the agent with the stored credential, only in a checked repository under CONFIG_ROOT."""
 
     def __init__(self, token_reader: Callable[[], str | None], connected: Callable[[], list[str]],
-                 config_root: Path = Path("/config"), askpass: str = ASKPASS_PATH, guard: str = GUARD_PATH,
+                 config_root: Path = CONFIG_ROOT, askpass: str = ASKPASS_PATH, guard: str = GUARD_PATH,
                  protected: tuple[str, ...] = (".storage", ".git/hooks"), python: str = sys.executable,
                  share_root: Path = Path("/share"), protected_share: tuple[str, ...] = ("HomeAssistant",)):
         self.token_reader = token_reader
@@ -561,21 +581,26 @@ class GitRunner:
         return [(self.share_root.resolve(), self.protected_share), (self.config_root.resolve(), self.protected)]
 
     def inside(self, resolved: Path) -> Path:
-        """Refuse a resolved path outside /share and /config, or in a protected folder; return its root."""
+        """Refuse a resolved path outside /share and CONFIG_ROOT, or in a protected folder; return its root."""
         for root, protected in self.roots():
             if resolved == root or root in resolved.parents:
                 relative = resolved.relative_to(root).as_posix() if resolved != root else ""
                 if any(relative == item or relative.startswith(item + "/") for item in protected):
                     raise GitHubError("That folder is protected.")
                 return root
-        raise GitHubError("The repository must be under /share or /config.")
+        raise GitHubError("The repository must be under /share or /homeassistant.")
 
     def repository_path(self, value: Any) -> Path:
-        """A work tree under /share or /config (links resolved first) with a real .git folder, not protected."""
+        """A work tree under /share or CONFIG_ROOT (links resolved first) with a real .git folder, not protected.
+
+        A relative path is refused, not read against a base: Codex starts in its working folder (/media/.agents/codex),
+        so "." read against CONFIG_ROOT could name the configuration repository instead of the one Codex means.
+        """
         if not isinstance(value, str) or not value or len(value) > 4096 or "\x00" in value:
-            raise GitHubError("Give the path of a git work tree under /share or /config.")
-        candidate = Path(value) if value.startswith("/") else self.config_root.resolve() / value
-        resolved = Path(os.path.realpath(candidate))
+            raise GitHubError("Give the path of a git work tree under /share or /homeassistant.")
+        if not value.startswith("/"):
+            raise GitHubError("Give the full path of the work tree, starting with /, for example /share/house_repo.")
+        resolved = Path(os.path.realpath(value))
         self.inside(resolved)
         dot_git = resolved / ".git"
         if dot_git.is_symlink() or not dot_git.is_dir():
@@ -855,6 +880,7 @@ class GitHubService:
             "last_check": {"at": last.get("at"), "state": last.get("state"), "reason": last.get("reason")} if last else None,
             "last_test": dict(self.last_test) if self.last_test else None,
             "revoke_url": TOKEN_REVOKE_URL if credential.get("kind") == "token" else APP_REVOKE_URL,
+            "add_repositories_url": add_repositories_url(state) if credential.get("kind") == "app" else "",
             "flow": flow,
         }
 
@@ -893,7 +919,7 @@ class GitHubService:
             raise GitHubError("The new sign-in could not be checked: " + str(exc)) from None
         if not live.get("repositories"):
             raise GitHubError("The GitHub App is not installed on any repository you can reach. Install it on "
-                              "the repositories of your choice, then press Connect again.")
+                              "the repositories of your choice, then sign in again.")
         self._save_connection("app", token, live, None)
         self.log("GitHub sign-in connected (app).")
 
@@ -969,7 +995,7 @@ class GitHubService:
 
     # -- checking ------------------------------------------------------------------------------------------
     def check(self) -> dict[str, Any]:
-        """The monitoring check: at start, hourly and on Check now. One event and one notice per change."""
+        """The monitoring check: at start, hourly and on a POST to /github/check. One event and one notice per change."""
         credential = self.store.read_credential()
         self.next_check = time.monotonic() + GITHUB_CHECK_SECONDS
         if not credential:
@@ -1063,8 +1089,8 @@ class GitHubService:
                 failure = failure or f"GitHub did not return {name} (HTTP {response.status_code})"
         ok = bool(names) and not failure
         text = (f"Read OK: {good} repositor{'y' if good == 1 else 'ies'}." if ok
-                else "Read failed: " + (failure or "no repository is connected") + ". Choose Check now to see "
-                "which repositories the sign-in reaches, or try again later.")
+                else "Read failed: " + (failure or "no repository is connected") + ". Look at the repositories listed on the card to see "
+                "which ones the sign-in reaches, or try again later.")
         self.last_test = {"at": iso(utc_now()), "ok": ok, "text": text}
         return self.status()
 
@@ -1166,7 +1192,7 @@ class GitHubService:
 def register(worker, service: GitHubService) -> GitHubService:
     """The page routes (section 2.5 of the design). Reads need the worker token or Ingress; every change also
     needs Ingress and a Home Assistant administrator."""
-    from flask import jsonify, request
+    from flask import Response, jsonify, request
 
     app = worker.app
 
@@ -1202,6 +1228,18 @@ def register(worker, service: GitHubService) -> GitHubService:
     @worker.require_auth
     def github_status():
         return jsonify(ok=True, github=service.status())
+
+    @app.get("/github/qr.svg")
+    @worker.require_auth
+    def github_qr():
+        """The QR code of GitHub's sign-in page while a device sign-in waits; 404 otherwise."""
+        flow = service.status()["flow"]
+        url = str(flow.get("verification_uri") or "")
+        if flow.get("status") != "waiting_for_user" or not url.startswith("https://github.com/"):
+            return jsonify(ok=False, error="no GitHub sign-in is waiting"), 404
+        response = Response(worker.login_qr_svg(url), mimetype="image/svg+xml")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.post("/github/connect", endpoint="github_connect")
     @admin

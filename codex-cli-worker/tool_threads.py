@@ -20,14 +20,14 @@ import threading
 THREAD_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
-def valid_thread_id(value):
+def valid_thread_id(value: object) -> str | None:
     """Return the value when it has the form of a Codex thread id, else None."""
     if isinstance(value, str) and THREAD_ID_RE.fullmatch(value):
         return value
     return None
 
 
-def thread_id_from_call(params):
+def thread_id_from_call(params: object) -> str:
     """Return the thread id that Codex put in a tools/call request, or "" when there is none.
 
     Only `params._meta.threadId` counts. A `threadId` among the arguments is the model's text and is ignored.
@@ -40,12 +40,13 @@ def thread_id_from_call(params):
 class ChatThreads:
     """The thread ids of the chats whose exchange runs now, each mapped to its task."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Start with no thread bound."""
         self.lock = threading.Lock()
-        self.tasks = {}
+        # Thread id -> task id.
+        self.tasks: dict[str, str] = {}
 
-    def bind(self, task_id, thread_id):
+    def bind(self, task_id: str, thread_id: object) -> bool:
         """Bind a thread to the task. Return False for a bad id or a thread that another task holds.
 
         The first task to bind a thread keeps it until its exchange ends; the same task may bind it again. Only
@@ -60,13 +61,13 @@ class ChatThreads:
                 return False
         return True
 
-    def release(self, task_id):
+    def release(self, task_id: str) -> None:
         """Remove every thread of the task, its own and its sub-agents'."""
         with self.lock:
             for thread_id in [key for key, value in self.tasks.items() if value == task_id]:
                 del self.tasks[thread_id]
 
-    def task_for(self, thread_id):
+    def task_for(self, thread_id: object) -> str | None:
         """Return the task that the thread is bound to, or None."""
         thread_id = valid_thread_id(thread_id)
         if thread_id is None:
@@ -74,7 +75,7 @@ class ChatThreads:
         with self.lock:
             return self.tasks.get(thread_id)
 
-    def threads_of(self, task_id):
+    def threads_of(self, task_id: str) -> list[str]:
         """Return the threads bound to the task, sorted."""
         with self.lock:
             return sorted(key for key, value in self.tasks.items() if value == task_id)
