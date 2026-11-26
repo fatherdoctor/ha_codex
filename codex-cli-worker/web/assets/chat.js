@@ -766,7 +766,52 @@ function fileCard(name, size, href) {
   const card = textNode("a", `${name} · ${sizeLabel(size)} ↓`, "document-attachment");
   card.href = href;
   card.download = name || "document";
+  offerAppSave(card, card.download);
   return card;
+}
+// The Home Assistant app shows this page in a web view (WKWebView on iPhone and iPad, a WebView on Android) that
+// ignores the download attribute and Content-Disposition: attachment, so a download link does nothing there. Where
+// that web view has the system share sheet, a tap shares the file instead; its Save Image and Save to Files keep it.
+const IN_HA_APP = /Home Assistant\/|; wv\)/.test(navigator.userAgent);
+// The share sheet refuses or mislabels a file of an unknown type, and the files route always answers
+// application/octet-stream, so the type comes from the name for the kinds Codex usually makes.
+const SHARE_TYPES = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+  pdf: "application/pdf", txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json",
+};
+/** Return the file at url, fetched for the share sheet, typed by its name where the server gives no useful type. */
+async function fileForShare(url, name) {
+  const response = await pageFetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error("The file could not be loaded. Try again.");
+  const blob = await response.blob();
+  const extension = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+  const type = SHARE_TYPES[extension] || (blob.type === "application/octet-stream" ? "" : blob.type);
+  return new File([blob], name, { type: type || "application/octet-stream" });
+}
+/**
+ * In the Home Assistant app, make a tap on a download link open the share sheet with the file. Elsewhere, and
+ * where the web view has no share sheet, the link downloads as before. The first tap fetches the file; if the web
+ * view then refuses the share because the tap is too old, the link asks for a second tap, which shares at once.
+ */
+function offerAppSave(link, name) {
+  if (!IN_HA_APP || typeof navigator.share !== "function" || typeof navigator.canShare !== "function") return;
+  let file = null;
+  const label = link.textContent;
+  link.addEventListener("click", async (event) => {
+    event.preventDefault();
+    showError(null);
+    try {
+      file ||= await fileForShare(link.href, name);
+      if (!navigator.canShare({ files: [file] }))
+        throw new Error("This app cannot save this file. Open Home Assistant in a web browser to download it.");
+      await navigator.share({ files: [file] });
+      link.textContent = label;
+    } catch (error) {
+      if (error?.name === "AbortError") return; // The person closed the share sheet.
+      if (error?.name === "NotAllowedError" && file) link.textContent = "Tap again to save";
+      else showError(error);
+    }
+  });
 }
 /**
  * Return what turns a link in an answer into a download of a file Codex saved
@@ -849,6 +894,7 @@ function renderAttachments(
     const download = textNode("a", "Download");
     download.href = attachmentUrl(taskId, attachment, true);
     download.setAttribute("download", attachment.name || "image");
+    offerAppSave(download, attachment.name || "image");
     caption.append(download);
     figure.append(link, caption);
     list.append(figure);

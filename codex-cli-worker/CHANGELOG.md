@@ -15,6 +15,12 @@
   0.6"); keep them in your file if you want them. A chat from before the update gets the built-in instructions with
   its next message.
 
+- **Save files on a phone or tablet.** In the Home Assistant app, a download link in a chat did nothing, because the
+  app's web view ignores downloads. Now **Download** on an image or a file opens the share sheet with the file, where
+  **Save Image** or **Save to Files** keeps it. If the app refuses the first tap, the link says "Tap again to save".
+  If the share sheet cannot take the file, the page says to open Home Assistant in a web browser. Where the app's web
+  view has no share sheet at all (an Android WebView), the link works as before. A web browser still downloads as
+  before.
 - **Copy a code block.** Each code block in a chat message has a **Copy** button at its top left. It puts the code on
   the clipboard and shows "Copied" for two seconds. Where the browser or app has no clipboard or refuses it, the button
   selects the code instead, so you can copy it by hand.

@@ -82,6 +82,9 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
   them read-only above the editor. An update of the app updates them. Your `AGENTS.md` takes priority over them.
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
   `/homeassistant`. Attachments are removed after 7 days or with the chat.
+- In the Home Assistant app on a phone or tablet, **Download** on an image or a file opens the share sheet; choose
+  **Save Image** or **Save to Files** there. Where the app has no share sheet, open Home Assistant in a web browser to
+  download.
 - Keep your own Home Assistant backups. The app's saved copies of changed files can be missing, and `secrets.yaml`
   and `.storage` are never copied. Codex can read and change both, like the rest of `/homeassistant`; the built-in
   instructions tell it to keep secrets out of chat, other files and commits.
