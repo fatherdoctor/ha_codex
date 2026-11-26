@@ -163,11 +163,13 @@ only Codex's own settings.
 |---|---|
 | Ask for approval | Edit files in your configuration folder. Shell networking and a write outside your configuration folder, `/share`, `/media` and the app's own folder need your permission. |
 | Approve for me | As Ask for approval, but Codex's own reviewer answers each request instead of you. |
-| Read only | Read files. A write, a device change or shell networking needs your permission for that one action. |
+| Read only | Read files. A write, a device change or shell networking needs your permission. |
 | Full access | Everything, without a sandbox and without asking. Off until an administrator turns it on in Settings. |
 
 A request shows a **Permission needed** card with the full command or file change, and the buttons **Allow once**
-and **Deny**. Only a Home Assistant administrator can answer it.
+and **Deny**. Only a Home Assistant administrator can answer it. A command or file change also has **Allow for this
+chat**: Codex then repeats that same command, or changes those same files, without asking again until the chat is
+paused or the app restarts.
 
 ## Safety
 

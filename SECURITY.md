@@ -22,7 +22,7 @@ keep connections short-lived. See [SSH setup and
 limits](docs/app-reference.md#ssh-connections).
 
 From 0.3.6 the app has no command check of its own: Codex's permission modes and the
-sandbox are the protection. A command you allow once runs outside the sandbox and can
+sandbox are the protection. A command you allow (once, or for this chat) runs outside the sandbox and can
 read private files or change the app's settings, and the app does not scan what Codex
 writes in `/homeassistant`. Read each permission card before you allow it.
 
