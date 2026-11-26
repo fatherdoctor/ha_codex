@@ -390,6 +390,15 @@ class AccountDefaultTests(ModelListStateMixin, unittest.TestCase):
         self.seen.return_value = "gpt-6-sol"
         self.assertIs(server.resolve_chat_settings({"model": None, "fast": None}, {})["fast"], True)
 
+    def test_a_pick_the_worker_does_not_know_keeps_the_chats_own_fast_choice(self):
+        # /status gives a display name, not a model id: the turn names no model, so the choice goes through unchanged.
+        self.seen.return_value = "Invented Display Name"
+        self.assertEqual(server.turn_model("default"), {})
+        for choice in (None, True, False):
+            with self.subTest(choice=choice):
+                settings = server.parse_chat_settings({"chat_settings": {"model": None, "fast": choice}})
+                self.assertIs(server.resolve_chat_settings(settings, {})["fast"], choice)
+
     def test_then_the_newest_sol_in_the_live_list(self):
         self.use_live(SOL_LIVE)
         # Versions compare as numbers: 7.10 is newer than 7.9.

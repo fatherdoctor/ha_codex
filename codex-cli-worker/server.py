@@ -837,10 +837,11 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
 
 
 def turn_fast(choice: bool | None, model: str, named: str) -> bool | None:
-    """Return the Fast setting of a turn. A chat that chose nothing, on a turn that names no model (turn_model: Codex's
-    pick not yet seen), gets None: the worker would only guess the Fast default of a model Codex may not run."""
-    if choice is None and not turn_model(model):
-        return None
+    """Return the Fast setting of a turn. On a turn that names no model (turn_model: Codex's pick not yet seen, or a
+    pick the worker does not know), the chat's own choice goes through unchanged, and a chat that chose nothing gets
+    None: the worker does not know the Fast tier of a model it does not name, so it neither guesses one nor drops one."""
+    if not turn_model(model):
+        return choice
     return run_fast(choice, model_fast(named))
 
 
