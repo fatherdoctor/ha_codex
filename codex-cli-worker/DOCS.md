@@ -78,11 +78,13 @@ More: [Sandbox](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
   backup leaves `/media` out unless you include it.
 - Rules for your house go in **Settings** > **Workspace instructions**, the app's `AGENTS.md`. A new install gets a
   short starter file once. It is yours to change or delete.
+- The app also sends built-in instructions with every chat: folders, tools, logs, secrets and GitHub. Settings shows
+  them read-only above the editor. An update of the app updates them. Your `AGENTS.md` takes priority over them.
 - Chats and the files you attach to a message (PNG, JPEG, GIF or WebP) stay in the app's private storage, not in
   `/homeassistant`. Attachments are removed after 7 days or with the chat.
 - Keep your own Home Assistant backups. The app's saved copies of changed files can be missing, and `secrets.yaml`
-  and `.storage` are never copied. Codex can read and change both, like the rest of `/homeassistant`; the starter
-  `AGENTS.md` tells it when to leave them alone.
+  and `.storage` are never copied. Codex can read and change both, like the rest of `/homeassistant`; the built-in
+  instructions tell it to keep secrets out of chat, other files and commits.
 
 More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-reference.md#backups).
 

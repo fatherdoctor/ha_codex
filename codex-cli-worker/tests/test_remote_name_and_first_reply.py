@@ -151,7 +151,7 @@ class FirstReplyPrompt(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             agents = Path(folder) / "AGENTS.md"
             with patch.object(server, "AGENTS_PATH", agents):
-                self.assertNotIn("AGENTS.md", server.remote_control_instructions({}))
+                self.assertNotIn("Owner workspace instructions", server.remote_control_instructions({}))
                 agents.write_text("Synthetic owner rules")
                 self.assertIn(f"Owner workspace instructions: {agents}. ",
                               server.remote_control_instructions({}))

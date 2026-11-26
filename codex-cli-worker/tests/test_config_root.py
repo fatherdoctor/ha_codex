@@ -14,9 +14,9 @@ sys.path.insert(0, str(WORKER))
 
 import app_paths  # noqa: E402
 
-# Files outside the check: app_paths.py holds OLD_CONFIG_ROOT, the one place the old name is kept on purpose.
-# starter_agents.md is replaced by CX-STARTER-06, which already names /homeassistant; until it lands it is left as it is.
-SKIPPED = {"app_paths.py", "starter_agents.md"}
+# Files outside the check: app_paths.py holds OLD_CONFIG_ROOT, the one place the old name is kept in code.
+# builtin_instructions.md is not read either: it tells Codex that /config does not exist, so it names it on purpose.
+SKIPPED = {"app_paths.py"}
 # "/config" as the folder: at the start of a path, not after a name ("api/config", "lovelace/config", ".git/config",
 # "<slug>/config"), and not Home Assistant's frontend address of the app's pages ("/config/app/<slug>/...").
 OLD_FOLDER = re.compile(r"(?<![\w}>.\-/])/config(?![\w-])(?!/app/)")
@@ -27,6 +27,7 @@ def checked_files():
     """Every worker file in which a /config path would reach the container or the owner."""
     files = [path for path in WORKER.glob("*.py")] + [WORKER / name for name in SCRIPTS]
     files += list(WORKER.glob("*.sh")) + list((WORKER / "gate").glob("*.toml"))
+    files.append(WORKER / "starter_agents.md")  # A new install's AGENTS.md: Codex follows its paths.
     files += list((WORKER / "translations").glob("*.yaml"))
     files += [path for path in (WORKER / "web").rglob("*") if path.is_file() and "vendor" not in path.parts]
     return sorted(path for path in files if path.name not in SKIPPED and path.is_file())
@@ -53,7 +54,8 @@ class ConfigRootTests(unittest.TestCase):
     def test_the_check_reads_the_files_that_reach_the_container(self):
         names = {path.relative_to(WORKER).as_posix() for path in checked_files()}
         for name in ("server.py", "codex-bwrap", "apparmor.txt", "Dockerfile", "config.yaml", "run.sh",
-                     "web/index.html", "web/assets/chat.js", "translations/en.yaml", "gate/requirements.toml"):
+                     "web/index.html", "web/assets/chat.js", "translations/en.yaml", "gate/requirements.toml",
+                     "starter_agents.md"):
             self.assertIn(name, names)
 
     def test_the_check_finds_a_planted_path_and_keeps_the_frontend_address(self):

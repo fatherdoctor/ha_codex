@@ -107,13 +107,15 @@ class TaskPayloadSnapshotTests(unittest.TestCase):
         }, task_id, {})
 
     def placeholders(self, value, task_id: str, turns: dict[str, str]):
-        """Replace the chat's id, turn ids, times and the temporary folder with fixed words.
+        """Replace the chat's id, turn ids, times, the temporary folder and the rules stamp with fixed words.
 
         `turns` maps each turn id to its numbered placeholder, in the order the ids first appear in the record.
-        Every 32-hex-digit id in these records is a turn id (the chat's own id is replaced first).
+        Every 32-hex-digit id in these records is a turn id (the chat's own id is replaced first). told_rules is a
+        fingerprint of rules that name the temporary folder, so only its presence is kept.
         """
         if isinstance(value, dict):
-            return {key: self.placeholders(item, task_id, turns) for key, item in value.items()}
+            return {key: "<rules-stamp>" if key == "told_rules" else self.placeholders(item, task_id, turns)
+                    for key, item in value.items()}
         if isinstance(value, list):
             return [self.placeholders(item, task_id, turns) for item in value]
         if isinstance(value, str):
