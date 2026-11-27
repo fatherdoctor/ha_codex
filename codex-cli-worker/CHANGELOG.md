@@ -4,6 +4,14 @@
 
 - The yellow **Settings** icon lights as soon as a chat exchange ends with a schedule proposal waiting, and when you
   come back to the page, instead of up to a minute later. The once-a-minute read stays as the backstop.
+
+- **The checks list says what it means.** A check that proves something did not work reads **Failed** and is the only
+  one in red. A check that could not confirm (Home Assistant was out of reach, or the check did not finish) now reads
+  **Not confirmed**, in a calm color, where it read **Unverified** under a red "1 failed". The closed line and the line
+  under the answer use the same words: "1 failed", "2 not confirmed", "1 check not confirmed", and both together when a turn has both
+  ("1 check failed, 2 not confirmed"). Readbacks of
+  read-only commands stay in the list as **Readback**: they are the evidence that a read happened.
+
 - **Built-in instructions.** The app now sends its own instructions with every chat, on the page and in remote
   control: the folders, the Home Assistant tools, how to read logs, and the rules for secrets and for Git and GitHub.
   An update of the app updates them. **Settings** > **Workspace instructions** shows them read-only above the
