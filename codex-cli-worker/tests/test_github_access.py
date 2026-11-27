@@ -305,7 +305,8 @@ class CheckTests(ServiceCase):
         self.assertIn("HTTP 404", result["text"])
         # Astro F5: a plain summary and a next step, with the HTTP number kept as the detail.
         self.assertTrue(result["text"].startswith(f"Read failed: GitHub did not return {REPO} (HTTP 404)."))
-        self.assertIn("Choose Check now", result["text"])
+        self.assertIn("Look at the repositories listed on the card", result["text"])
+        self.assertNotIn("Check now", result["text"])
 
 
 class TokenFallbackTests(ServiceCase):
@@ -490,6 +491,15 @@ class GitRunnerTests(GitRunnerCase):
         for path in (str(outside), "../elsewhere", str(self.config / ".storage"), str(self.repo / ".git"), "", "x\x00y"):
             with self.subTest(path=path), self.assertRaises(gh.GitHubError):
                 self.runner.prepare(path)
+
+    def test_a_relative_path_is_refused_not_read_against_config(self):
+        """Codex starts in /media/.agents/codex, so "." or "house" read against /homeassistant could name the wrong repository."""
+        git(self.config, "init", "-q")
+        for path in (".", "house", "./house"):
+            with self.subTest(path=path), self.assertRaises(gh.GitHubError) as refused:
+                self.runner.prepare(path)
+            self.assertIn("starting with /", str(refused.exception))
+        self.assertEqual(self.runner.prepare(str(self.repo))[0], self.repo.resolve())
 
     def test_a_git_file_pointing_elsewhere_is_refused(self):
         linked = self.config / "linked"

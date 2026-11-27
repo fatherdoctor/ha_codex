@@ -97,7 +97,7 @@ RUN chmod 0555 /usr/share/ha_codex/hass_mcp_launch.py && chown root:root /usr/sh
 WORKDIR /data
 
 COPY run.sh /
-COPY server.py account_access.py safety_block.py codex_host.py starter_agents.md /
+COPY server.py account_access.py safety_block.py codex_host.py starter_agents.md builtin_instructions.md /
 COPY interaction_diagnostics.py diagnostics_scrub.py /
 # Codex's managed requirements (the sandbox modes and approval policies a client may ask for) and managed
 # config (the tool keys kept out of commands), read-only, outside /homeassistant and every sandbox's writable roots.

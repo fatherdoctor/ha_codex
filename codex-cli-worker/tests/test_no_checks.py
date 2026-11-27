@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
+from chat_scripts import chat_source
 import test_backups
 from test_server import server
 
@@ -83,7 +84,7 @@ class NoChecksAfterTheTurnTests(unittest.TestCase):
         self.assertFalse(hasattr(server, "review_backups"))
         source = (WORKER / "server.py").read_text(encoding="utf-8")
         self.assertNotIn("Verification needs review", source)
-        chat = (WORKER / "web" / "assets" / "chat.js").read_text(encoding="utf-8")
+        chat = chat_source()
         self.assertNotIn("No previous version saved", chat)
         self.assertNotIn("renderBackups", chat)
 

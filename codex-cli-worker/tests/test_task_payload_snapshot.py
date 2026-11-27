@@ -1,6 +1,7 @@
 """Snapshots of what a chat's record looks like to everyone who reads it, for each way an exchange can end.
 
-For a completed answer, a question with choices, a reply that continues the chat, a failed start and a cancel, this
+For a completed answer, a question with choices, a reply that continues the chat, a failed start, a cancel, a timeout
+and a chat that waits on a permission request, this
 test keeps four things: the codex_cli_task_result event Home Assistant gets (its name and its data), the task as the
 API sends it (full and as a list summary), the chat's task.json, and its line in the task index. Times, ids and the
 temporary folder are replaced by placeholders, so the snapshot holds only the shape and the values the worker chose.
@@ -17,6 +18,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
@@ -24,6 +27,7 @@ from unittest.mock import patch
 
 from app_server_fixture import StubAppServer
 from test_server import server
+from approvals import COMMAND_APPROVAL  # noqa: E402 - test_server puts the worker folder on the path
 
 SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "task_payload_snapshot.json"
 SESSION_ID = "019fc242-910a-7c92-a17d-54c014e19fc4"
@@ -76,20 +80,30 @@ class TaskPayloadSnapshotTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json["task_id"]
 
-    def run_codex(self, task_id: str, final: dict, *, reply: str | None = None) -> None:
-        """Run one exchange with a stand-in Codex that gives the final answer."""
+    def run_codex(self, task_id: str, final: dict | None, *, reply: str | None = None,
+                  process: StubAppServer | None = None, timeout: int = 30) -> None:
+        """Run one exchange with a stand-in Codex that gives the final answer, or with the stand-in given."""
         if reply is not None:
             response = self.client.post(f"/tasks/{task_id}/reply", json={"reply": reply}, headers=self.headers)
             self.assertEqual(response.status_code, 200, response.json)
+        options = {"task_timeout_seconds": timeout, "task_stall_seconds": 0, "auto_save_lovelace": False}
         with (
             patch.object(server, "build_manifest", return_value={}),
             patch.object(server, "sandbox_readiness", return_value={"required": True, "ready": True}),
-            patch.object(server, "read_options", return_value={"task_timeout_seconds": 30, "auto_save_lovelace": False}),
+            patch.object(server, "read_options", return_value=options),
             patch.object(server, "validate_changed_files", return_value=[]),
-            patch.object(server.subprocess, "Popen", return_value=StubAppServer(SESSION_ID, final)),
+            patch.object(server.subprocess, "Popen", return_value=process or StubAppServer(SESSION_ID, final)),
         ):
             server.run_task(task_id, "Tidy up my automations", SESSION_ID if reply else None, reply)
         server.active_task_runners.discard(task_id)
+
+    def wait_for(self, condition, what: str) -> None:
+        """Wait up to ten seconds for a condition on the running chat."""
+        deadline = time.monotonic() + 10
+        while not condition():
+            if time.monotonic() > deadline:
+                self.fail(f"timed out waiting for {what}")
+            time.sleep(0.02)
 
     def record(self, task_id: str) -> dict:
         """Return the event, the payloads and the saved files of a chat, with placeholders for what varies."""
@@ -107,13 +121,15 @@ class TaskPayloadSnapshotTests(unittest.TestCase):
         }, task_id, {})
 
     def placeholders(self, value, task_id: str, turns: dict[str, str]):
-        """Replace the chat's id, turn ids, times and the temporary folder with fixed words.
+        """Replace the chat's id, turn ids, times, the temporary folder and the rules stamp with fixed words.
 
         `turns` maps each turn id to its numbered placeholder, in the order the ids first appear in the record.
-        Every 32-hex-digit id in these records is a turn id (the chat's own id is replaced first).
+        Every 32-hex-digit id in these records is a turn id (the chat's own id is replaced first). told_rules is a
+        fingerprint of rules that name the temporary folder, so only its presence is kept.
         """
         if isinstance(value, dict):
-            return {key: self.placeholders(item, task_id, turns) for key, item in value.items()}
+            return {key: "<rules-stamp>" if key == "told_rules" else self.placeholders(item, task_id, turns)
+                    for key, item in value.items()}
         if isinstance(value, list):
             return [self.placeholders(item, task_id, turns) for item in value]
         if isinstance(value, str):
@@ -183,6 +199,32 @@ class TaskPayloadSnapshotTests(unittest.TestCase):
         self.assertTrue(accepted, error)
         self.assertTrue(server.publish_cancelled_task_outcome(task_id))
         self.check("cancelled", self.record(task_id))
+
+    def test_timeout(self):
+        """An exchange that ends because Codex ran past the time limit."""
+        task_id = self.create()
+        self.run_codex(task_id, None, process=StubAppServer(SESSION_ID, None, hold=True), timeout=1)
+        self.check("timeout", self.record(task_id))
+
+    def test_waiting_on_a_permission_request(self):
+        """A running exchange that waits on the owner's answer to a permission request."""
+        task_id = self.create()
+        process = StubAppServer(SESSION_ID, None, hold=True)
+        process.on_turn = lambda: process.emit(id=0, method=COMMAND_APPROVAL, params={
+            "threadId": SESSION_ID, "turnId": process.turn_id, "itemId": "item", "startedAtMs": 1,
+            "command": "ls /homeassistant", "cwd": "/homeassistant", "reason": "List the configuration folder",
+        })
+        runner = threading.Thread(target=self.run_codex, args=(task_id, None), kwargs={"process": process})
+        runner.start()
+        try:
+            self.wait_for(lambda: server.task_payload(server.tasks[task_id])["permission_required"],
+                          "the permission request")
+            record = self.record(task_id)
+        finally:
+            server.request_task_cancellation(task_id)
+            process.close()
+            runner.join(timeout=10)
+        self.check("permission", record)
 
 
 if __name__ == "__main__":

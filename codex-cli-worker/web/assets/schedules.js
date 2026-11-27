@@ -277,7 +277,6 @@
       for (const [index, schedule] of data.schedules.entries()) {
         const item = node("div", "");
         item.append(node("strong", schedule.name), chatLine(schedule, titles[index]), node("p", `${schedule.approved ? schedule.enabled ? "On" : "Paused" : "Needs your approval"}${setByCodex(schedule)} · ${describe(schedule.spec)} · ${schedule.mode === "read-only" ? "Read only" : "Ask for approval"} · ${when(schedule.next_due)}`, "muted"));
-        const prompt = node("details", "", "disclosure"); prompt.append(node("summary", "Review prompt"), node("pre", schedule.prompt)); item.append(prompt);
         const actions = node("div", "", "settings-actions");
         const editButton = button("Edit", () => openEditor(schedule));
         editButton.disabled = Boolean(schedule.prompt_redacted || !zone);

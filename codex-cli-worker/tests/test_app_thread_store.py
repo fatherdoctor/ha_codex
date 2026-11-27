@@ -77,8 +77,9 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(thread["method"], "thread/resume")
         self.assertEqual(thread["params"]["threadId"], "thread")
         self.assertEqual(thread["params"]["developerInstructions"], server.PAGE_INSTRUCTIONS)
-        # A chat from before 0.6 resumes in the new folder and is told what its old /config/ paths mean (CX-HA-PATH).
-        self.assertEqual(thread["params"]["cwd"], server.CONFIG_ROOT.as_posix())
+        # A chat from before 0.6 resumes in Codex's working folder and is told what its old /config/ paths mean
+        # (CX-HA-PATH).
+        self.assertEqual(thread["params"]["cwd"], server.codex_workdir())
         self.assertIn(server.old_config_note(), thread["params"]["developerInstructions"])
         self.assertEqual(turn["params"]["input"], [{"type": "text", "text": OWNER_TEXT}])
 
@@ -89,7 +90,7 @@ class FixedTextTests(unittest.TestCase):
     def test_the_rules_map_an_old_config_path_and_keep_home_assistants_own_yaml(self):
         """Since 0.6 the folder is /homeassistant; /config/ in Home Assistant's own YAML stays (CX-HA-PATH)."""
         text = server.PAGE_INSTRUCTIONS
-        self.assertIn("Workspace: /homeassistant\n", text)
+        self.assertIn("Home Assistant configuration: /homeassistant\n", text)
         self.assertIn("Home Assistant's configuration folder is /homeassistant. /config does not exist here; a path "
                       "in this chat or in the owner's text that starts with /config/ means the same file under "
                       "/homeassistant/. Inside Home Assistant's own YAML, /config/ is Home Assistant's own path and "
@@ -99,7 +100,7 @@ class FixedTextTests(unittest.TestCase):
     def test_the_rules_name_no_per_message_detail(self):
         """No task id, backup folder, attachment, token note, documentation date, GitHub note or user message."""
         text = server.PAGE_INSTRUCTIONS
-        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "HA_URL", "stored locally",
+        for changing in ("Task id", "codex_tasks", "copy it to", "The user attached", "$HA_URL/api", "stored locally",
                          "github_git", "Current user message"):
             self.assertNotIn(changing, text)
         self.assertIn("call the home_assistant_data exchange_info tool once", text)
@@ -168,11 +169,12 @@ class ExchangeRecordTests(unittest.TestCase):
     run_codex = attachments.AttachmentTests.run_codex
 
     def test_a_page_thread_has_the_rules_and_its_messages_are_the_owner_text(self):
-        """The first exchange marks the thread; a follow-up gets no pointer and exchange_info holds no rules."""
+        """The first exchange records the rules it was told; a follow-up gets no pointer and exchange_info holds no rules."""
         task_id = self.create(OWNER_TEXT)
         info, message = self.run_and_record_plain(task_id)
         self.assertEqual(message, "Draw a sheep")
-        self.assertTrue(server.tasks[task_id]["page_instructions"])
+        self.assertEqual(server.tasks[task_id]["told_rules"], server.rules_stamp(server.build_page_instructions()))
+        self.assertTrue(server.tasks[task_id]["page_instructions"])  # still written, for 0.5 after a rollback
         self.assertNotIn("rules", info)
         self.assertEqual(info["task_id"], task_id)
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And now the porch")
@@ -186,14 +188,33 @@ class ExchangeRecordTests(unittest.TestCase):
         """
         task_id = self.create(OWNER_TEXT)
         server.update_task(task_id, session_id=attachments.SESSION_ID)
-        self.assertNotIn("page_instructions", server.tasks[task_id])
+        self.assertNotIn("told_rules", server.tasks[task_id])
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch light")
         # Its permissions are told once too: what the app set for the thread is not known here.
         changed = server.PERMISSIONS_CHANGED.format(note=info["permissions"])
         self.assertEqual(message, server.RULES_POINTER + "\n\n" + changed + "\n\nCheck the porch light")
         self.assertEqual(info["rules"], server.build_page_instructions())
-        # A resume never marks the thread: only a thread this page starts gets the rules at its first turn.
-        self.assertNotIn("page_instructions", server.tasks[task_id])
+        # Told once: the next message has no pointer and exchange_info no rules.
+        info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
+        self.assertEqual(message, "And the gate")
+        self.assertNotIn("rules", info)
+
+    def test_a_chat_from_before_an_update_gets_the_new_rules_once(self):
+        """A chat whose thread was told older rules (0.5 kept only a page_instructions flag) is pointed to the new ones.
+
+        Codex keeps a thread's first developer instructions until a compaction, so the resume alone does not reach it.
+        """
+        for record in ({"page_instructions": True}, {"told_rules": server.rules_stamp("rules of an older version")}):
+            with self.subTest(record=record):
+                task_id = self.create(OWNER_TEXT)
+                server.update_task(task_id, session_id=attachments.SESSION_ID, **record)
+                info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Fix it")
+                self.assertTrue(message.startswith(server.RULES_POINTER + "\n\n"))
+                self.assertEqual(info["rules"], server.build_page_instructions())
+                self.assertIn(server.BUILTIN_INSTRUCTIONS, info["rules"])
+                info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Again")
+                self.assertEqual(message, "Again")
+                self.assertNotIn("rules", info)
 
     def test_a_chat_switched_to_full_access_is_told_once_on_its_next_message(self):
         """A chat that started in Read only and is switched to Full access is told so on the next message only."""
@@ -226,7 +247,8 @@ class ExchangeRecordTests(unittest.TestCase):
     def test_a_resumed_thread_with_no_record_is_told_its_permissions_once(self):
         """A thread from the ChatGPT app or an earlier version has no record of what it was told."""
         task_id = self.create(OWNER_TEXT)
-        server.update_task(task_id, session_id=attachments.SESSION_ID, page_instructions=True)
+        server.update_task(task_id, session_id=attachments.SESSION_ID,
+                           told_rules=server.rules_stamp(server.build_page_instructions()))
         info, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="Check the porch")
         self.assertEqual(message, server.PERMISSIONS_CHANGED.format(note=info["permissions"]) + "\n\nCheck the porch")
         _, message = self.run_and_record_plain(task_id, session_id=attachments.SESSION_ID, reply="And the gate")
@@ -267,6 +289,18 @@ class ExchangeRecordTests(unittest.TestCase):
             task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
             {"codex_sandbox": "workspace-write"})
         self.assertEqual(session.thread_params["developerInstructions"], server.build_page_instructions())
+
+    def test_codex_starts_in_its_working_folder_and_keeps_config_writable(self):
+        """The thread starts in its working folder; /homeassistant, /share and /media are the writable roots."""
+        task_id = self.create(OWNER_TEXT)
+        workdir = Path(self.enterContext(tempfile.TemporaryDirectory())) / "codex"
+        workdir.mkdir()
+        with patch.object(server, "CODEX_WORKDIR", workdir):
+            session = server.create_approval_session(
+                task_id, attachments.StubAppServer(attachments.SESSION_ID), "Prompt", Path("final"), None, {},
+                {"codex_sandbox": "workspace-write"})
+        self.assertEqual(session.thread_params["cwd"], str(workdir))
+        self.assertEqual(session.turn_params["sandboxPolicy"]["writableRoots"][:4], ["/homeassistant", "/share", "/media", "/media/.agents"])
 
     def run_and_record_plain(self, task_id, session_id=None, reply=None):
         """Run one exchange through run_codex's fake process and return exchange_info's details and the message."""

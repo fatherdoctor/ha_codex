@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HTTP worker that runs Codex CLI against Home Assistant's configuration folder (CONFIG_ROOT)."""
+"""HTTP worker that runs Codex CLI for Home Assistant: working folder /media/.agents/codex, configuration in CONFIG_ROOT."""
 
 from __future__ import annotations
 
@@ -68,12 +68,6 @@ import old_path_scan
 from interaction_diagnostics import RollingDiagnostics, InteractionRecorder
 from app_paths import CONFIG_ROOT, OLD_CONFIG_ROOT, from_old_config_path
 
-# Where a workspace-write task may write without an approval. /share is the owner's ruling of 2026-11-16:
-# the add-on gets the same /share access as the Claude add-on (clones live there). /data/github stays
-# masked by codex-bwrap and is never a writable root.
-TASK_WRITABLE_ROOTS = (CONFIG_ROOT.as_posix(), "/share")
-
-
 class _ToolWorker:
     """Let worker-owned tools reach this module's functions and state by name."""
 
@@ -85,6 +79,30 @@ class _ToolWorker:
 verification = Verification(_ToolWorker())
 
 
+# Codex's working folder: its notes, scratch files and drafts go here, not into Home Assistant's
+# configuration. It is in /media because the automatic backup leaves /media out, so scratch files do not
+# make every backup larger. It is created at start and is never moved or emptied. CONFIG_ROOT stays a writable
+# root (TASK_WRITABLE_ROOTS), so configuration edits work as before; only the folder Codex starts in changes.
+# One constant, so a later option for the folder replaces one read.
+MEDIA_ROOT = Path("/media")
+CODEX_WORKDIR = MEDIA_ROOT / ".agents" / "codex"
+# Where a workspace-write task may write without an approval. /share is the owner's ruling of 2026-11-16:
+# the add-on gets the same /share access as the Claude add-on (clones live there). /media is the ruling of
+# 2026-11-22, for the same reason: the Claude add-on writes anywhere in /media, and Codex's working folder
+# is there. The working folder's parent is a root of its own because Codex's sandbox keeps a folder named
+# .agents (like .git and .codex) read-only when it sits directly in a writable root: with /media alone,
+# /media/.agents/claude and a new file in /media/.agents would need a card. A project's .agents folder holds
+# skills Codex loads; /media/.agents is not a project folder, and nothing in /media/.agents outside the working
+# folder is loaded as instructions (the working folder's own AGENTS.md is).
+# /addon_config, the app's own folder, is the ruling of 2026-11-22: the Claude add-on writes its own addon_config
+# folder, so Codex may change the owner's AGENTS.md there without a permission card. The editor under Settings
+# already wrote it without one, and CONFIG_ROOT, which Home Assistant runs, needs no card either.
+# /data/github stays masked by codex-bwrap and is never a writable root.
+# The app's own folder (config.yaml maps addon_config here); AGENTS_PATH below is in it.
+ADDON_CONFIG_ROOT = Path("/addon_config")
+TASK_WRITABLE_ROOTS = (
+    str(CONFIG_ROOT), "/share", str(MEDIA_ROOT), str(CODEX_WORKDIR.parent), str(ADDON_CONFIG_ROOT),
+)
 DATA_ROOT = Path("/data")
 # Files a person attaches to a message live in their own folder in the app's data folder, and the
 # backup leaves them out (config.yaml, backup_exclude: "*/chat_uploads"). The Supervisor matches each
@@ -126,15 +144,17 @@ CODEX_CONFIG_PATH = CODEX_HOME / "config.toml"
 CODEX_BINARY = "/usr/local/bin/codex"
 # The owner's workspace instructions live in the app's own addon_config folder (config.yaml maps it at
 # /addon_config; HA's config folder is CONFIG_ROOT). Codex loads them as its global instructions
-# through a link at CODEX_HOME/AGENTS.md. Codex runs with its working folder in CONFIG_ROOT, so a second copy
-# there would be read twice; the file is moved out of CONFIG_ROOT once and never copied.
-ADDON_CONFIG_ROOT = Path("/addon_config")
+# through a link at CODEX_HOME/AGENTS.md. Versions before 0.4 kept the file at the top of HA's config folder, where
+# Codex read it as the instructions of its working folder; it is moved out of CONFIG_ROOT once and never copied.
 AGENTS_PATH = ADDON_CONFIG_ROOT / "AGENTS.md"
 LEGACY_AGENTS_PATH = CONFIG_ROOT / "AGENTS.md"
 CODEX_AGENTS_LINK = CODEX_HOME / "AGENTS.md"
 AGENTS_MOVE_BACKUP = DATA_ROOT / "agents_before_move.md"
 # The starter text for a home with no AGENTS.md; it ships beside this file in the app image.
 STARTER_AGENTS_PATH = Path(__file__).resolve().parent / "starter_agents.md"
+# The built-in layer of the instructions: the app's own rules (paths, tools, logs, secrets, git), sent with every
+# chat's developer instructions, so an update of the app updates them. The owner's AGENTS.md is the other layer.
+BUILTIN_INSTRUCTIONS = (Path(__file__).resolve().parent / "builtin_instructions.md").read_text(encoding="utf-8").strip()
 TASK_STATE_FILE = DATA_ROOT / "task_index.json"
 MESSAGE_QUEUE_FILE = DATA_ROOT / "message_queue.json"
 HA_DOCS_ROOT = DATA_ROOT / "ha-docs"
@@ -833,7 +853,16 @@ def resolve_chat_settings(settings: dict[str, Any], options: dict[str, Any]) -> 
         effort = "medium"
     if effort is None:
         effort = default_effort(options, model, efforts)
-    return {"model": model, "reasoning_effort": effort, "fast": run_fast(settings.get("fast"), model_fast(named))}
+    return {"model": model, "reasoning_effort": effort, "fast": turn_fast(settings.get("fast"), model, named)}
+
+
+def turn_fast(choice: bool | None, model: str, named: str) -> bool | None:
+    """Return the Fast setting of a turn. On a turn that names no model (turn_model: Codex's pick not yet seen, or a
+    pick the worker does not know), the chat's own choice goes through unchanged, and a chat that chose nothing gets
+    None: the worker does not know the Fast tier of a model it does not name, so it neither guesses one nor drops one."""
+    if not turn_model(model):
+        return choice
+    return run_fast(choice, model_fast(named))
 
 
 def run_fast(choice: bool | None, offered: bool | None) -> bool | None:
@@ -966,7 +995,7 @@ def _codex_sandbox_probe(mode: str) -> dict[str, Any]:
                 "--",
                 "/bin/true",
             ],
-            cwd=str(CONFIG_ROOT),
+            cwd=codex_workdir(),
             env=codex_env(),
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -1159,9 +1188,9 @@ def write_starter_agents_file() -> bool:
 def migrate_agents_file() -> bool:
     """Move an AGENTS.md from HA's config folder into the app's own folder once; return True when moved.
 
-    The file is MOVED after a backup copy in the app's data folder, never copied: Codex runs with its
-    working folder in CONFIG_ROOT and would read both. Only a regular file moves (a link or folder is the
-    owner's own arrangement), and nothing moves when the new place already has a file, so neither is
+    The file is MOVED after a backup copy in the app's data folder, never copied: when Codex works from
+    CONFIG_ROOT (older versions, or when its working folder is missing) it would read both. Only a regular file moves
+    (a link or folder is the owner's own arrangement), and nothing moves when the new place already has a file, so neither is
     overwritten; that case is logged. A failure is logged and never stops the start.
     """
     try:
@@ -1235,6 +1264,74 @@ FINAL_RESPONSE_SCHEMA = {
 }
 
 
+def ensure_codex_workdir() -> None:
+    """Create Codex's working folder if it is missing; log one line when Codex must work from CONFIG_ROOT.
+
+    A folder that is there already is left as it is. /media itself is never created, so a missing /media
+    leaves Codex in CONFIG_ROOT. The app does not check that /media is the mapped folder: config.yaml maps it
+    (tests/test_codex_workdir.py checks the map). Below /media the folders are made one at a time and a link
+    stops the walk, so the start never creates a folder through a link below /media.
+    """
+    if MEDIA_ROOT.is_dir():
+        try:
+            _make_workdir_below_media()
+        except OSError as err:
+            print(f"Cannot create {CODEX_WORKDIR}; Codex works from {CONFIG_ROOT}: {err}", flush=True)
+            return
+    if codex_workdir() != str(CODEX_WORKDIR):
+        print(workdir_fallback_line(), flush=True)
+
+
+def workdir_fallback_line() -> str:
+    """The start's log line when Codex works from CONFIG_ROOT: the link in the path, or that the folder is missing."""
+    link = _first_link_below_media()
+    if link is None:
+        return f"{CODEX_WORKDIR} is missing or is not a plain folder; Codex works from {CONFIG_ROOT}."
+    line = f"{CODEX_WORKDIR} has a link in its path, at {link}; Codex works from {CONFIG_ROOT}."
+    if link == CODEX_WORKDIR.parent:
+        # Codex keeps a folder named .agents read-only inside a writable root. When that name is a link (to
+        # anything, or to nothing) it refuses to build the workspace-write sandbox ("crosses writable symlink"), so
+        # every command in Ask for approval and Approve for me fails. Read only still runs. Only the owner can remove
+        # the link.
+        line += (f" Until the link {link} is removed, Codex cannot run commands in Ask for approval or Approve for"
+                 " me; Read only still works.")
+    return line
+
+
+def _first_link_below_media() -> Path | None:
+    """The first part of the path from /media down to CODEX_WORKDIR that is a link, or None."""
+    return next((folder for folder in _folders_below_media() if folder.is_symlink()), None)
+
+
+def _make_workdir_below_media() -> None:
+    """Make each missing folder from /media down to CODEX_WORKDIR; stop at the first link."""
+    for folder in _folders_below_media():
+        if folder.is_symlink():
+            return
+        folder.mkdir(exist_ok=True)
+
+
+def _folders_below_media() -> list[Path]:
+    """Each folder from /media down to CODEX_WORKDIR, /media itself left out: /media/.agents, then its codex."""
+    folders = []
+    folder = MEDIA_ROOT
+    for part in CODEX_WORKDIR.relative_to(MEDIA_ROOT).parts:
+        folder = folder / part
+        folders.append(folder)
+    return folders
+
+
+def codex_workdir() -> str:
+    """The folder each Codex process starts in: CODEX_WORKDIR, or CONFIG_ROOT when it is not a real folder.
+
+    A link in any part of the path is refused, so a file in /media cannot point the working folder
+    somewhere else.
+    """
+    if CODEX_WORKDIR.is_dir() and CODEX_WORKDIR.resolve() == CODEX_WORKDIR:
+        return str(CODEX_WORKDIR)
+    return str(CONFIG_ROOT)
+
+
 def write_git_identity_defaults(options: dict[str, Any]) -> None:
     """Give Git a system-level fallback. Each checkout can still set its own name and email."""
     name = str(options.get("git_author_name") or "").strip() or "ChatGPT Codex"
@@ -1255,6 +1352,7 @@ def ensure_runtime_files() -> None:
     write_git_identity_defaults(read_options())
     remote_control.prepare_control_parent(DATA_ROOT)
     task_root().mkdir(parents=True, exist_ok=True)
+    ensure_codex_workdir()
     # The GitHub sign-in's private folder: 0700, masked in every sandbox (codex-bwrap).
     github_service.store.ensure()
     if not api_token():
@@ -1306,9 +1404,9 @@ def restore_saved_task(task_id: str, task: dict[str, Any]) -> bool:
             forget_secret_diffs(approvals)
             secrets_forgotten = True
     if task.get("status") in {"queued", "running"}:
-        task["status"] = "failed"
-        task["summary"] = task["error"] = "Worker restarted while this task was active."
-        sync_current_turn(task)
+        message = "Worker restarted while this task was active."
+        task_store.record_result(task, {"status": "failed", "summary": message, "error": message},
+                                 str(task.get("updated_at") or utc_now()))
     if waited and not task_waits_on_owner(task):
         dismiss_wait_notice_async(task_id)
     return secrets_forgotten
@@ -1665,7 +1763,7 @@ def fetch_codex_usage_status() -> dict[str, Any]:
                 "--config",
                 status_line_config,
             ],
-            cwd=CONFIG_ROOT.as_posix(),
+            cwd=codex_workdir(),
             env=env,
             stdin=slave_fd,
             stdout=slave_fd,
@@ -1770,7 +1868,7 @@ def read_codex_rate_limits(codex: str) -> dict[str, Any]:
     """Ask `codex app-server` for the account's rate limits (`account/rateLimits/read`) and return its result."""
     proc = subprocess.Popen(
         [codex, "app-server", "--config", "check_for_update_on_startup=false"],
-        cwd=CONFIG_ROOT.as_posix(), env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        cwd=codex_workdir(), env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
     )
     try:
@@ -1797,7 +1895,7 @@ def read_codex_models(codex: str) -> list[dict[str, Any]]:
     """Ask `codex app-server` for the account's model list (`model/list`, every page) and return its entries."""
     proc = subprocess.Popen(
         [codex, "app-server", "--config", "check_for_update_on_startup=false"],
-        cwd=CONFIG_ROOT.as_posix(), env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        cwd=codex_workdir(), env=codex_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
     )
     try:
@@ -2497,11 +2595,6 @@ task_turns = task_store.task_turns
 def atomic_json_write(path: Path, value: Any) -> None:
     """Replace a JSON file in one step; the worker-owned tools write task.json through this name."""
     task_store.atomic_json_write(path, value)
-
-
-def sync_current_turn(task: dict[str, Any]) -> None:
-    """Keep this exchange's outcome alongside the compatible task-level result."""
-    task_store.sync_current_turn(task, utc_now())
 
 
 def new_turn(message: str) -> dict[str, Any]:
@@ -3513,13 +3606,20 @@ def drop_credential_backups(run_dir: Path) -> None:
 
 
 def secret_config_path(path: Any) -> bool:
-    """Whether a path Codex names (absolute, or relative to CONFIG_ROOT) is a secret file under CONFIG_ROOT."""
+    """Whether a path Codex names is a secret file under CONFIG_ROOT.
+
+    A relative path is read both against CONFIG_ROOT and against Codex's working folder, and either
+    reading that names a secret file counts: a diff is blanked once too often, never once too few.
+    """
     text = str(path or "")
     if not text:
         return False
-    full = os.path.normpath(os.path.join(CONFIG_ROOT.as_posix(), text))
     prefix = CONFIG_ROOT.as_posix() + "/"
-    return full.startswith(prefix) and secret_file_path(full[len(prefix):])
+    for base in (CONFIG_ROOT.as_posix(), codex_workdir()):
+        full = os.path.normpath(os.path.join(base, text))
+        if full.startswith(prefix) and secret_file_path(full[len(prefix):]):
+            return True
+    return False
 
 
 def forget_secret_diffs(records: list[dict[str, Any]]) -> None:
@@ -4203,7 +4303,7 @@ def codex_local_login_status() -> dict[str, Any]:
     try:
         proc = subprocess.run(
             [codex, "login", "status"],
-            cwd=CONFIG_ROOT.as_posix(),
+            cwd=codex_workdir(),
             env=codex_env(),
             text=True,
             capture_output=True,
@@ -4462,7 +4562,7 @@ def run_codex_device_login(login_id: str) -> None:
     try:
         proc = subprocess.Popen(
             [codex, "login", "--device-auth"],
-            cwd=CONFIG_ROOT.as_posix(),
+            cwd=codex_workdir(),
             env=codex_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -4568,7 +4668,7 @@ def logout_codex() -> dict[str, Any]:
     try:
         proc = subprocess.run(
             [codex, "logout"],
-            cwd=CONFIG_ROOT.as_posix(),
+            cwd=codex_workdir(),
             env=codex_env(),
             text=True,
             capture_output=True,
@@ -4860,6 +4960,8 @@ def codex_env() -> dict[str, str]:
     The Supervisor tokens and inherited tool capabilities are removed, HOME and
     CODEX_HOME point into the add-on's data folder, and HA_TOKEN is set only
     from the add-on option, together with HA_URL, the address it works at.
+    Without the option HA_URL is not set either: a call to it without a token
+    counts as a failed login, and Home Assistant bans the app after a few.
     """
     env = dict(os.environ)
     # The *_CAPABILITY names are no longer set for a chat; they are still removed in case a parent process has them.
@@ -4876,9 +4978,9 @@ def codex_env() -> dict[str, str]:
     token = str(options.get("HA_TOKEN") or "").strip()
     if token:
         env["HA_TOKEN"] = token
-    url = codex_ha_url(options)
-    if url:
-        env["HA_URL"] = url
+        url = codex_ha_url(options)
+        if url:
+            env["HA_URL"] = url
     return env
 
 
@@ -4962,9 +5064,10 @@ def home_assistant_api_instructions(options: dict[str, Any]) -> str:
 
 
 def remote_control_instructions(options: dict[str, Any]) -> str:
-    """Offer token-free observational reads and keep native command decisions intact."""
-    return (
-        f"You are running in the Home Assistant add-on. Workspace: {CONFIG_ROOT}. {old_config_note()} "
+    """Offer token-free observational reads, keep native command decisions intact, and end with the built-in layer."""
+    return with_builtin_instructions(
+        f"You are running in the Home Assistant add-on. {old_config_note()} "
+        f"Put notes, scratch files and drafts in {CODEX_WORKDIR}, not in {CONFIG_ROOT}. "
         + (f"Owner workspace instructions: {AGENTS_PATH}. " if AGENTS_PATH.is_file() else "")
         + "When this thread continues on the Home Assistant page, "
         "call the home_assistant_data exchange_info tool first there. "
@@ -4979,7 +5082,12 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
         "request native approval for that specific network command on your own; do not silently give up after a sandbox network denial. "
         "Keep API credentials private. A sandboxed command needing network or file access outside its sandbox must request "
         "native approval for that specific action. Never bypass a denial or request permanent permission rules. "
-        "Native approval does not supply credentials. If HA_URL is unset, report address discovery unavailable instead of guessing a port. "
+        "Native approval does not supply credentials. HA_URL is set only with a configured HA_TOKEN; when it is unset, use the tools instead of guessing a port. "
+        "Never call HA_URL or the Home Assistant REST or WebSocket API yourself, with or without a token. "
+        "Use the Home Assistant tools. If they cannot do it, say so and stop. "
+        "For an action that answers with data (calendar.get_events, weather.get_forecasts, todo.get_items), use home_assistant_call.call: home_assistant_mcp's call_service_tool cannot return that data. "
+        "An unauthenticated call counts as a failed login and gets the app banned. "
+        "The only exception is an API call with a configured HA_TOKEN, as the text below allows. "
         + (home_assistant_api_instructions(options) or
            "No Core API token is configured for direct commands. The read tool and the call tool still work through "
            "the worker. "
@@ -4992,7 +5100,8 @@ def remote_control_instructions(options: dict[str, Any]) -> str:
 # only text that never changes. What changes from one message to the next is in exchange_info().
 _PAGE_INSTRUCTIONS_TEMPLATE = """You are Codex running as a Home Assistant add-on worker.
 
-Workspace: @@CONFIG_ROOT@@
+Working folder: @@WORKDIR@@ (your notes, scratch files and drafts go here, not into @@CONFIG_ROOT@@)
+Home Assistant configuration: @@CONFIG_ROOT@@
 
 @@OLD_CONFIG_NOTE@@
 
@@ -5019,6 +5128,7 @@ Use the home_assistant MCP verify tool for authenticated Home Assistant checks, 
   {"operation":"logs"}
   {"operation":"dashboard_readback","path":"/lovelace/0"}
 The MCP tool runs through the worker outside the shell network sandbox. Use it for supported verification instead of shell socket commands. If the user's task needs a different API or shell networking in a sandboxed mode, request approval for that specific command. Approval does not supply API credentials. Logs are limited to Core.
+Never call HA_URL or the Home Assistant REST or WebSocket API yourself, with or without a token. Use the Home Assistant tools. For an action that answers with data (calendar.get_events, weather.get_forecasts, todo.get_items), use home_assistant_call.call: home_assistant_mcp's call_service_tool cannot return that data. If they cannot do it, say so and stop. An unauthenticated call counts as a failed login and gets the app banned. The only exception is an API call that exchange_info's home_assistant_api text allows, with HA_TOKEN.
 Use fresh entity readback after any user-authorized reload or change. These read tools do not perform reloads or device actions; the home_assistant_call call tool does, and only when the user asked for the change. A matching state does not prove automation behavior. Do not expose credentials or try to obtain the user's login. Verification results are attached to this exchange automatically.
 To change a dashboard, make the change, read its configuration back with dashboard_readback, and report what changed. After a storage-dashboard edit, add "save_pending":true to the dashboard_readback request to have the worker save that turn's pending edit first and compare the readback with it. This requires auto_save_lovelace to be enabled. Without save_pending, the readback reads the dashboard currently loaded in Home Assistant, and the worker saves the edit when the turn ends. No tool renders or screenshots a dashboard.
 
@@ -5044,17 +5154,37 @@ def old_config_note() -> str:
     )
 
 
+def with_builtin_instructions(text: str) -> str:
+    """Put BUILTIN_INSTRUCTIONS at the end of a chat's developer instructions.
+
+    Codex sends the owner's AGENTS.md as user instructions after the developer instructions. The built-in text
+    gives the owner's file priority in its first line, and coming last it sits directly before that file, so
+    "anything here" means the built-in text only, not the page's tool rules above it.
+    """
+    return text.rstrip("\n") + "\n\n" + BUILTIN_INSTRUCTIONS + "\n"
+
+
 def build_page_instructions():
-    """The page rules; the scheduling paragraph is in them only while scheduled runs are switched on."""
+    """The page rules and the built-in layer; the scheduling paragraph is in them only while scheduled runs are on."""
     paragraph = SCHEDULING_PARAGRAPH + "\n\n" if scheduling.SCHEDULED_RUNS else ""
-    text = _PAGE_INSTRUCTIONS_TEMPLATE.replace("@@SCHEDULING_PARAGRAPH@@", paragraph)
-    return text.replace("@@OLD_CONFIG_NOTE@@", old_config_note()).replace("@@CONFIG_ROOT@@", CONFIG_ROOT.as_posix())
+    text = (_PAGE_INSTRUCTIONS_TEMPLATE.replace("@@SCHEDULING_PARAGRAPH@@", paragraph)
+            .replace("@@WORKDIR@@", str(CODEX_WORKDIR)))
+    text = text.replace("@@OLD_CONFIG_NOTE@@", old_config_note()).replace("@@CONFIG_ROOT@@", CONFIG_ROOT.as_posix())
+    return with_builtin_instructions(text)
 
 
 PAGE_INSTRUCTIONS = build_page_instructions()  # for callers that read it at import; the send paths call the function
 
-# Put in front of a page message on a thread that did not get PAGE_INSTRUCTIONS when it started: a thread
-# started in the ChatGPT app, or by version 0.3.2 or earlier of this app. exchange_info then returns the rules too.
+
+def rules_stamp(text: str) -> str:
+    """A short fingerprint of the page rules, kept as a task's told_rules to show which rules its thread was told."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+# Put in front of a page message on a thread whose told_rules differ from the current rules: a thread started in the
+# ChatGPT app, by an earlier version of this app, or before an update changed the rules. Codex keeps a thread's first
+# developer instructions until a compaction, so without this line an old chat runs on the old rules.
+# exchange_info then returns the rules too.
 RULES_POINTER = ("[Home Assistant page] Call the home_assistant_data exchange_info tool first. "
                  "Its rules entry holds the rules for messages from this page, and they replace older copies.")
 
@@ -5490,7 +5620,7 @@ def create_approval_session(
     settings = task_mode_settings(task_id, options)
     mode = settings["sandbox"]
     thread_params: dict[str, Any] = {
-        "cwd": CONFIG_ROOT.as_posix(), "sandbox": mode, "approvalPolicy": settings["approval_policy"],
+        "cwd": codex_workdir(), "sandbox": mode, "approvalPolicy": settings["approval_policy"],
         "approvalsReviewer": settings["approvals_reviewer"],
     }
     if session_id:
@@ -5512,9 +5642,8 @@ def create_approval_session(
         thread_params["threadId"], proc = open_thread(thread_params)
     assert proc is not None
     model_field = turn_model(model)
-    # The tier goes only with a named model: execution["fast"] is the Fast default of the model the worker assumed,
-    # and a turn that names none runs on Codex's own pick, which may have another default.
-    tier_field = turn_service_tier(execution) if model_field else {}
+    # A turn that names no model and whose chat chose no Fast setting has fast None (turn_fast), so it sends no tier.
+    tier_field = turn_service_tier(execution)
     return AppServerSession(
         proc.stdin, lock=lock, thread_params=thread_params,
         turn_params={"input": [{"type": "text", "text": prompt},
@@ -5540,7 +5669,7 @@ def turn_model(model: str) -> dict[str, str]:
     keeps the thread's last model, so each turn names its model; a chat set back to the default gets the CLI's pick
     by name (codex_default_model: the live list's default, else /status). The pick is named only when it is a model
     the worker knows: for any other model /status gives its display text, which is not a model id. Before either named
-    a known pick, the turn names none, as before, and no service tier either.
+    a known pick, the turn names none, as before, and no service tier unless the chat chose Fast on or off (turn_fast).
     """
     if model not in {"default", "gpt-5.3-codex"}:
         return {"model": model}
@@ -5735,10 +5864,12 @@ def request_task_cancellation(
 
         waited = task_waits_on_owner(task)
         completed_at = str(task.get("completed_at") or utc_now())
-        task.update(
+        task["cancellation_requested"] = True
+        task["updated_at"] = utc_now()
+        task_store.record_result(
+            task,
             {
                 "status": "cancelled",
-                "cancellation_requested": True,
                 "completed_at": completed_at,
                 "returncode": None,
                 "summary": CANCELLED_TASK_SUMMARY,
@@ -5752,10 +5883,9 @@ def request_task_cancellation(
                 "config_check": dict(EMPTY_CONFIG_CHECK),
                 "recovery_files": [],
                 "backups": [],
-                "updated_at": utc_now(),
-            }
+            },
+            task["updated_at"],
         )
-        sync_current_turn(task)
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         task_store.atomic_json_write(task_dir / "task.json", task)
@@ -5780,10 +5910,8 @@ def publish_cancelled_task_outcome(task_id: str, returncode: int | None = None) 
             return False
 
         task["cancellation_event_emitted"] = True
-        if returncode is not None:
-            task["returncode"] = returncode
         task["updated_at"] = utc_now()
-        sync_current_turn(task)
+        task_store.record_result(task, {} if returncode is None else {"returncode": returncode}, task["updated_at"])
         task_dir = get_task_dir(task_id)
         task_dir.mkdir(parents=True, exist_ok=True)
         task_store.atomic_json_write(task_dir / "task.json", task)
@@ -5962,7 +6090,9 @@ def record_background_start_failure(task_id: str, exc: Exception) -> None:
         with lock:
             task = tasks.setdefault(task_id, {"task_id": task_id})
             if not task.get("cancellation_requested"):
-                task.update(
+                task["updated_at"] = completed_at
+                task_store.record_result(
+                    task,
                     {
                         "status": "failed",
                         "completed_at": completed_at,
@@ -5978,8 +6108,8 @@ def record_background_start_failure(task_id: str, exc: Exception) -> None:
                         "config_check": dict(EMPTY_CONFIG_CHECK),
                         "recovery_files": [],
                         "backups": [],
-                        "updated_at": completed_at,
-                    }
+                    },
+                    completed_at,
                 )
         print(
             "Could not persist background task startup failure: "
@@ -6074,7 +6204,7 @@ def live_fingerprint_rows() -> dict[str, Any]:
 
 def spawn_live_process(args: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
     """Start the live process in the way run_task starts a process for one exchange."""
-    return subprocess.Popen(args, cwd=CONFIG_ROOT.as_posix(), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    return subprocess.Popen(args, cwd=codex_workdir(), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1)
 
 
@@ -6227,6 +6357,7 @@ class PreparedExchange(NamedTuple):
     before_manifest_path: Path
     options: dict[str, Any]
     permissions: str
+    rules: str
 
 
 def check_launch_policy(task_id: str) -> None:
@@ -6294,21 +6425,21 @@ def reset_final_file(final_file: Path) -> None:
 def write_exchange_message(task_id: str, prepared: PreparedExchange, prompt: str, reply: str | None,
                            session_id: str | None, backup_dir: Path | None) -> None:
     """Write the message Codex reads, and set the exchange_info that its tools return."""
-    # A thread this page starts gets PAGE_INSTRUCTIONS from its first turn. Any other thread (started in the
-    # ChatGPT app, or by 0.3.2 or earlier) gets a pointer in the message, and exchange_info carries the rules for it.
-    # A new thread learns its sandbox when it starts. A resumed thread is told in the message when its permissions
-    # differ from the ones it was last told; with no record (a thread from the ChatGPT app, or from an earlier version
-    # of this app) it is told once.
+    # A new thread gets the page rules as its developer instructions and learns its sandbox when it starts. A resumed
+    # thread is told in the message when its rules or its permissions differ from the ones it was last told (run_task
+    # records both once the turn starts); with no record (a thread from the ChatGPT app, or from an earlier version of
+    # this app) it is told once. For the rules that is a pointer in the message, and exchange_info carries them.
     permissions = prepared.permissions
     with lock:
         task = tasks.get(task_id, {})
-        has_page_instructions = bool(task.get("page_instructions"))
+        told_rules = task.get("told_rules")
         told_permissions = task.get("told_permissions")
-    point_to_rules = bool(session_id) and not has_page_instructions
+    point_to_rules = bool(session_id) and told_rules != prepared.rules
     changed_permissions = permissions if session_id and told_permissions != permissions else ""
     ha_data.set_exchange_info(task_id, exchange_info(task_id, backup_dir, include_rules=point_to_rules,
                                                      permissions=permissions))
     if not session_id:
+        # Deprecated, written only so that 0.5 after a rollback still sees a page thread; this build reads told_rules.
         update_task(task_id, page_instructions=True)
     try:
         prepared.prompt_file.write_text(page_message(prompt, reply=reply, point_to_rules=point_to_rules,
@@ -6351,7 +6482,8 @@ def prepare_exchange(task_id: str, prompt: str, session_id: str | None, reply: s
     reset_final_file(final_file)
     prepare_ha_docs()
     permissions = permissions_note(task_mode_settings(task_id, options))
-    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions)
+    rules = rules_stamp(build_page_instructions())
+    prepared = PreparedExchange(task_dir, final_file, prompt_file, before_manifest_path, options, permissions, rules)
     write_exchange_message(task_id, prepared, prompt, reply, session_id, backup_dir)
     checkpoint(task_id)
     check_model_pin(task_id, options)
@@ -6379,7 +6511,7 @@ def start_codex_process(task_id: str, args: list[str]) -> subprocess.Popen[str]:
     try:
         proc = subprocess.Popen(
             args,
-            cwd=CONFIG_ROOT.as_posix(),
+            cwd=codex_workdir(),
             env=codex_env(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -6506,10 +6638,11 @@ def run_task(task_id: str, prompt: str, session_id: str | None = None, reply: st
     task_dir, final_file = prepared.task_dir, prepared.final_file
     before_manifest_path, permissions = prepared.before_manifest_path, prepared.permissions
     # Record what Codex was told only once its turn started: after a failed start or a cancel before the turn,
-    # Codex never read the message, so the next message must carry the permissions line again. A repeated line does
-    # no harm; a lost one leaves Codex naming the old mode. (update_task changes nothing after a cancel.)
+    # Codex never read the message, so the next message must carry the rules pointer and the permissions line again.
+    # A repeated line does no harm; a lost one leaves Codex on the old rules or naming the old mode. (update_task
+    # changes nothing after a cancel.)
     if approval_session.turn_id:
-        update_task(task_id, told_permissions=permissions)
+        update_task(task_id, told_permissions=permissions, told_rules=prepared.rules)
     if task_cancellation_requested(task_id):
         return
     if lifecycle_error is not None and not approval_session.turn_id:
@@ -7420,6 +7553,8 @@ def get_agents() -> Response:
             "path": str(AGENTS_PATH),
             "exists": AGENTS_PATH.exists(),
             "content": content,
+            # Shown read-only above the editor; the editor never saves it into AGENTS.md.
+            "builtin": BUILTIN_INSTRUCTIONS,
         }
     )
 
@@ -8259,15 +8394,25 @@ def relay_read_mcp_args() -> list[str]:
 
 
 def relay_tool_args() -> list[str]:
-    """The app's tools: the read tool, approved ahead, the call tool, which Codex asks for each time, and the
-    Home Assistant MCP server when its option is on (hass_mcp.py): its read tools approved ahead, its write tools
-    asked about before each call.
+    """The relay's settings beside its instructions: the page's writable folders, and the app's tools: the read
+    tool, approved ahead, the call tool, which Codex asks for each time, and the Home Assistant MCP server when its
+    option is on (hass_mcp.py): its read tools approved ahead, its write tools asked about before each call.
 
     The shell exclude keeps HA_MCP_CAPABILITY, the token relay_env gives hass-mcp, out of every command;
     /etc/codex/managed_config.toml holds the same exclude for every client.
     """
-    return [*shell_exclude_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True),
+    return [*shell_exclude_args(), *relay_writable_roots_args(), *relay_read_mcp_args(), *call_mcp_args(relay=True),
             *hass_mcp.mcp_args(read_options(), sys.executable, relay=True)]
+
+
+def relay_writable_roots_args() -> list[str]:
+    """Give the relay's Codex the chat page's writable folders.
+
+    The page sends TASK_WRITABLE_ROOTS with each turn; the relay's threads come from the ChatGPT app, so the
+    process's config must carry them. Without it a relay thread in workspace-write may write only its start
+    folder, which is the working folder (CODEX_WORKDIR), and asks before each change in CONFIG_ROOT.
+    """
+    return ["--config", "sandbox_workspace_write.writable_roots=" + json.dumps(list(TASK_WRITABLE_ROOTS))]
 
 
 remote_control_supervisor = remote_control.Supervisor(
@@ -8278,6 +8423,7 @@ remote_control_supervisor = remote_control.Supervisor(
     name_factory=lambda: read_options().get("remote_control_name"),
     instructions_factory=lambda: remote_control_instructions(read_options()),
     tool_args_factory=relay_tool_args,
+    workdir_factory=codex_workdir,
 )
 
 

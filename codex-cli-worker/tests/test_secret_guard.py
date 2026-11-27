@@ -3,9 +3,9 @@
 Home Assistant keeps sign-ins, tokens and integration credentials in .storage, beside
 dashboards and other state, and secrets.yaml holds the values that `!secret` names.
 The worker leaves both out of the full snapshot and deletes any copy of them in an
-exchange's backup folder, in every permission mode. In a sandbox, .storage is
-read-only and secrets.yaml is hidden, so Codex can change them only after the
-person approves the change on a permission card.
+exchange's backup folder, in every permission mode. In a sandbox both are
+readable and writable like the rest of /homeassistant, as in the Claude add-on; the
+built-in instructions (builtin_instructions.md) tell Codex to keep secrets out of chat, files and commits.
 """
 from __future__ import annotations
 
@@ -272,7 +272,7 @@ class ApprovalRecordTests(unittest.TestCase):
 
 
 class SandboxTests(unittest.TestCase):
-    """In every sandbox .storage is read-only, so a write there fails and Codex must ask for a permission card."""
+    """In every sandbox secrets.yaml and all of .storage stay readable and writable under Codex's bind of /homeassistant."""
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -285,7 +285,6 @@ class SandboxTests(unittest.TestCase):
         real.chmod(0o755)
         self.wrapper = self.root / "bwrap"
         source = (WORKER / "codex-bwrap").read_text(encoding="utf-8")
-        self.assertIn('READ_ONLY_DIRS="/homeassistant/.storage"', source)
         self.wrapper.write_text(
             source.replace("REAL_BWRAP=/opt/codex-sandbox/bwrap.real", f"REAL_BWRAP={real}")
             .replace("/homeassistant/", f"{self.root}/config/"),
@@ -297,33 +296,19 @@ class SandboxTests(unittest.TestCase):
     def run_wrapper(self):
         args = ["--ro-bind", "/", "/", "--bind", f"{self.root}/config", f"{self.root}/config", "--", "/bin/sh", "-c", "true"]
         subprocess.run([str(self.wrapper), *args], check=True)
-        return args, self.record.read_text(encoding="utf-8").split("\n")
+        return self.record.read_text(encoding="utf-8").split("\n")
 
-    def test_storage_is_bound_read_only_after_codex_binds_and_before_the_masks(self):
+    def test_no_bind_or_mask_names_secrets_or_storage(self):
         self.storage.mkdir(parents=True)
-        (self.storage / "auth").write_text("{}", encoding="utf-8")
+        for name in ("auth", "auth_provider.homeassistant", "lovelace"):
+            (self.storage / name).write_text("{}", encoding="utf-8")
         (self.root / "config" / "secrets.yaml").write_text("a: b\n", encoding="utf-8")
-        args, recorded = self.run_wrapper()
-        separator = recorded.index("--")
-        before = recorded[:separator]
-        storage = str(self.storage)
-        read_only = before.index(storage)
-        self.assertEqual(before[read_only - 1:read_only + 2], ["--ro-bind", storage, storage])
-        # After Codex's own writable bind of /homeassistant, so that bind cannot make it writable again.
-        self.assertGreater(read_only, before.index(f"{self.root}/config", before.index("--bind")))
-        # Before the masks of the hidden files inside it, so they stay hidden.
-        self.assertLess(read_only, before.index(str(self.storage / "auth")))
-        self.assertIn(str(self.root / "config" / "secrets.yaml"), before)
-
-    def test_a_missing_or_linked_storage_folder_is_not_bound(self):
-        _, recorded = self.run_wrapper()
-        self.assertNotIn(str(self.storage), recorded)
-        elsewhere = self.root / "elsewhere"
-        elsewhere.mkdir()
-        self.storage.parent.mkdir(parents=True, exist_ok=True)
-        self.storage.symlink_to(elsewhere)
-        _, recorded = self.run_wrapper()
-        self.assertNotIn(str(self.storage), recorded)
+        recorded = self.run_wrapper()
+        before = recorded[:recorded.index("--")]
+        for path in (self.storage, self.storage / "auth", self.storage / "auth_provider.homeassistant",
+                     self.storage / "lovelace", self.root / "config" / "secrets.yaml"):
+            with self.subTest(path=path.name):
+                self.assertNotIn(str(path), before)
 
 
 if __name__ == "__main__":
