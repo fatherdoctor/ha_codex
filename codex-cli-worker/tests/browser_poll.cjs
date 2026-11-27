@@ -94,6 +94,19 @@ async function testPoll(page) {
     `),
     { afterTwo: 1, afterStop: 1, waiting: false },
   );
+  // A stop() while the check is working keeps the repeat from starting again when the check ends.
+  assert.deepEqual(
+    await inPage(page, `
+      let count = 0;
+      const check = poll("test-late", async () => { await sleep(30); return ++count; }, () => 10);
+      const running = check.run();
+      check.stop();
+      await running;
+      await sleep(60);
+      return { count, waiting: check.waiting };
+    `),
+    { count: 1, waiting: false },
+  );
 }
 
 /** Check the button helper: disabled while the action works, enabled after, and where a failure goes. */
@@ -133,6 +146,24 @@ async function testPagePolls(page) {
   assert.deepEqual(await page.evaluate(() => [polls.refresh.waiting, polls.usage.waiting]), [true, true]);
 }
 
+/** Check the page's real repeat intervals: the delay each check asks for is the one the page schedules. */
+async function testRealIntervals(page) {
+  assert.deepEqual(
+    await page.evaluate(async () => {
+      const delays = {};
+      const real = window.setTimeout;
+      for (const name of ["usage", "refresh"]) {
+        let asked;
+        window.setTimeout = (fn, delay) => { asked = delay; return real(() => {}, 0); };
+        try { await polls[name].run(); } finally { window.setTimeout = real; }
+        delays[name] = asked;
+      }
+      return { usage: delays.usage, refreshMatchesState: delays.refresh === (state.active ? 3000 : 12000) };
+    }),
+    { usage: 60000, refreshMatchesState: true },
+  );
+}
+
 /** Open the chat page and run the helper checks; page errors go to the caller's list. */
 async function testPollHelpers(browser, _output, errors) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -142,6 +173,7 @@ async function testPollHelpers(browser, _output, errors) {
   await testPoll(page);
   await testBusyAction(page);
   await testPagePolls(page);
+  await testRealIntervals(page);
   await page.close();
 }
 

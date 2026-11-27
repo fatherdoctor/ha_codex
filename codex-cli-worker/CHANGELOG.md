@@ -168,6 +168,9 @@
   they cannot do it. The one exception is the API call that the **Home Assistant access token** option allows.
   Codex now gets `HA_URL`, Home Assistant's address, only when that option is set; before, it got the address
   without the token too.
+- A reply that arrives after Settings closes no longer restarts the sign-in or remote-control check: `poll()` now
+  ends its repeats when `stop()` is called while a check is still working. The page test also checks that the quota
+  check repeats every minute and the chat list at its working or idle pace.
 
 ## 0.5.0 (draft)
 
