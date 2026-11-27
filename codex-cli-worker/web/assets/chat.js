@@ -904,26 +904,43 @@ function tickElapsed() {
       ? ` · ${elapsedLabel(Date.now() - activity.startedAt)}`
       : "";
 }
-/** Check results that mean something did not work, or could not be confirmed. */
-const BAD_CHECK_STATUSES = new Set(["failed", "issues", "unavailable"]);
+/** A check result that proves something did not work. */
+const FAILED_CHECK_STATUSES = new Set(["failed"]);
+/** Check results that could not confirm anything either way; they are not a failure. */
+const UNCONFIRMED_CHECK_STATUSES = new Set(["issues", "unavailable"]);
+/** The words of a row, the same ones the closed line and the line under the answer count. */
+const CHECK_LABELS = {passed: "Passed", failed: "Failed", observed: "Readback"};
+/** Count an exchange's checks by kind: real failures apart from checks that could not confirm. */
+function checkCounts(checks) {
+  return {
+    failed: checks.filter(check => FAILED_CHECK_STATUSES.has(check.status)).length,
+    unconfirmed: checks.filter(check => UNCONFIRMED_CHECK_STATUSES.has(check.status)).length,
+  };
+}
+/** Say "1 failed", "2 not confirmed" or both, for the closed line; "" when there is neither. */
+function checkCountText({failed, unconfirmed}) {
+  return [failed && `${failed} failed`, unconfirmed && `${unconfirmed} not confirmed`].filter(Boolean).join(", ");
+}
 /**
  * Build the collapsed checks block of an answer: one expandable row per check
  * with its result and details. It stays closed under the answer. The closed
- * line counts the bad results, so a failed check shows without opening the
- * block. Returns null when the turn has no checks.
+ * line counts the failed and the not confirmed results apart, so a failed check
+ * shows without opening the block; only a failure is red. Returns null when the turn has no checks.
  */
 function renderVerification(turn) {
   const checks = turn.verification || [];
   if (!checks.length) return null;
   const section = textNode("details", "", "verification disclosure");
-  const bad = checks.filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+  const counts = checkCounts(checks);
   const title = checks.length === 1 ? "Check and readback" : `Checks and readback (${checks.length})`;
-  const summary = textNode("summary", bad ? `${title} · ${bad} failed` : title);
-  if (bad) summary.classList.add("has-failed");
+  const counted = checkCountText(counts);
+  const summary = textNode("summary", counted ? `${title} · ${counted}` : title);
+  if (counts.failed) summary.classList.add("has-failed");
+  else if (counts.unconfirmed) summary.classList.add("has-unconfirmed");
   section.append(summary);
   for (const check of checks) {
     const row = textNode("details", "", `verification-result disclosure is-${check.status}`);
-    const label = {passed: "Passed", failed: "Failed", observed: "Readback"}[check.status] || "Unverified";
+    const label = CHECK_LABELS[check.status] || "Not confirmed";
     row.append(textNode("summary", `${label} · ${check.entity_id || check.path || check.target || check.operation}`));
     if (check.message) row.append(textNode("pre", check.message));
     if (check.state !== undefined) row.append(textNode("p", `State: ${check.state}${check.expected_state !== null ? ` · Expected: ${check.expected_state}` : ""}`));
@@ -943,9 +960,9 @@ function workedLabel(turn) {
   if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return "";
   return `Worked for ${elapsedLabel(completed - started)}`;
 }
-/** Count the checks of an exchange that failed or could not be confirmed. */
-function badCheckCount(turn) {
-  return (turn.verification || []).filter(check => BAD_CHECK_STATUSES.has(check.status)).length;
+/** Count the checks of an exchange by kind (see checkCounts). */
+function turnCheckCounts(turn) {
+  return checkCounts(turn.verification || []);
 }
 // Only an exchange with a turn id of this form can have saved steps (see TURN_ID_RE in server.py).
 const SAVED_TURN_ID = /^[0-9a-f]{32}$/;
@@ -1032,17 +1049,23 @@ function renderWorked(turn, checks, taskId) {
   };
   return block;
 }
+/** Say "1 check failed", "2 not confirmed" or both; "check" appears once, on the first count. */
+function checkLineText({failed, unconfirmed}) {
+  const first = failed || unconfirmed;
+  const noun = first === 1 ? "check" : "checks";
+  const parts = [];
+  if (failed) parts.push(`${failed} ${noun} failed`);
+  if (unconfirmed) parts.push(failed ? `${unconfirmed} not confirmed` : `${unconfirmed} ${noun} not confirmed`);
+  return parts.join(", ");
+}
 /**
- * Build the line that stays under an answer when a check failed, so the owner
+ * Build the line that stays under an answer when a check failed or went unconfirmed, so the owner
  * sees an accident without a tap. A click opens the checks.
  */
-function failedChecksLine(count, openChecks) {
-  const line = textNode("button", "", "check-failed-line");
+function failedChecksLine(counts, openChecks) {
+  const line = textNode("button", "", counts.failed ? "check-failed-line" : "check-failed-line is-unconfirmed");
   line.type = "button";
-  line.append(
-    textNode("span", count === 1 ? "1 check failed" : `${count} checks failed`),
-    textNode("span", "", "activity-chevron"),
-  );
+  line.append(textNode("span", checkLineText(counts)), textNode("span", "", "activity-chevron"));
   line.onclick = openChecks;
   return line;
 }
@@ -1176,8 +1199,8 @@ function renderTask(force = false) {
         answer.append(renderChoices(turn));
       const check = renderConfigCheck(turn.config_check);
       if (check) answer.append(check);
-      const bad = badCheckCount(turn);
-      if (bad) answer.append(failedChecksLine(bad, openChecks));
+      const counts = turnCheckCounts(turn);
+      if (counts.failed || counts.unconfirmed) answer.append(failedChecksLine(counts, openChecks));
       if (attachments.length)
         answer.append(renderAttachments(task.task_id, attachments));
       answer.append(
