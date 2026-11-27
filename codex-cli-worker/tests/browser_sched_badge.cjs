@@ -25,6 +25,14 @@ const assert = require('node:assert/strict');
       assert.equal(await level(), '', `width ${width}: no warning before the exchange ends`);
       await page.evaluate(() => fetchSelected());
       await page.waitForFunction(() => document.body.dataset.attention === 'yellow');
+      // A chat opened after its exchange already ended (no earlier task state) lights the icon too.
+      await page.evaluate(() => { state.task = null; });
+      proposed = false;
+      await page.evaluate(() => document.dispatchEvent(new Event('chat-exchange-end')));
+      await page.waitForFunction(() => document.body.dataset.attention !== 'yellow');
+      proposed = true;
+      await page.evaluate(() => fetchSelected());
+      await page.waitForFunction(() => document.body.dataset.attention === 'yellow');
       assert.deepEqual(errors, []);
       await page.close();
     }
