@@ -2,6 +2,9 @@
 
 ## 0.6.0 (unreleased)
 
+- The yellow **Settings** icon lights as soon as a chat exchange ends with a schedule proposal waiting, and when you
+  come back to the page, instead of up to a minute later. The once-a-minute read stays as the backstop.
+
 - **The checks list says what it means.** A check that proves something did not work reads **Failed** and is the only
   one in red. A check that could not confirm (Home Assistant was out of reach, or the check did not finish) now reads
   **Not confirmed**, in a calm color, where it read **Unverified** under a red "1 failed". The closed line and the line

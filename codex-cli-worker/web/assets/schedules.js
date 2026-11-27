@@ -69,11 +69,20 @@
       .map((schedule) => `${schedule.id}:${schedule.revision}`));
     return latest;
   }
-  /** Read the schedules once a minute, so a proposal shows on the Settings icon while Settings is closed. */
-  async function watchProposals() {
+  /** Read the schedules when Settings is closed and the page is in view, so a proposal shows on the Settings icon. */
+  async function readProposals() {
     if (!dialog.open && !document.hidden) await load().catch(() => {});
+  }
+  /**
+   * Read at once when a chat exchange ends or the page comes back into view, and once a minute as the backstop
+   * (a proposal made elsewhere, or by a scheduled run).
+   */
+  async function watchProposals() {
+    await readProposals();
     setTimeout(watchProposals, 60000);
   }
+  document.addEventListener("chat-exchange-end", readProposals);
+  document.addEventListener("visibilitychange", readProposals);
   /** The schedule a chat belongs to: the one made from it, or else the one that started it. */
   function scheduleOfChat(id) {
     const made = latest.schedules.find((schedule) => schedule.chat_id === id);
