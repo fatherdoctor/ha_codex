@@ -151,6 +151,30 @@
     }
     list.value = selected || "";
   }
+  /**
+   * Where the runs go: the chat the schedule belongs to, or a new chat for each run. The chat to offer is the
+   * schedule's own, else the chat whose menu opened the editor. A line under the choice says what happens when
+   * that chat cannot go on.
+   */
+  function showTarget(selected, offered) {
+    const list = el("schedule-chat");
+    list.replaceChildren();
+    if (offered) {
+      const option = node("option", "This chat"); option.value = offered; list.append(option);
+      Promise.resolve(chatTitle(offered)).then((title) => {
+        if (title === null) option.textContent = "This chat (not found; the next run starts a new chat)";
+        else if (title) option.textContent = `This chat: ${title}`;
+      });
+    }
+    const fresh = node("option", "A new chat each run"); fresh.value = ""; list.append(fresh);
+    list.value = selected;
+    showTargetNote();
+  }
+  function showTargetNote() {
+    el("schedule-chat-note").textContent = el("schedule-chat").value
+      ? "Each run is the next message in this chat. If the chat is deleted or archived, or cannot continue, the run starts a new chat, and later runs continue there. While a chat is working, the run waits."
+      : "Each run starts a new chat named for the schedule. While a chat is working, the run waits.";
+  }
   /** The part of Advanced settings a saved schedule has: its state, pause or approval, delete, and its runs. */
   function showSaved(schedule) {
     el("schedule-saved").hidden = !schedule;
@@ -202,17 +226,19 @@
   /**
    * Open the editor on a saved schedule, or on a new one for a chat.
    * A new schedule starts from the chat's title and its first message.
+   * start.chat_id is the chat whose menu opened the editor; Runs in offers it.
    */
   function openEditor(schedule, start = {}) {
     const masked = Boolean(schedule?.prompt_redacted);
     el("schedule-form").reset();
     el("schedule-title").textContent = schedule ? "Edit schedule" : "Schedule this chat";
     el("schedule-id").value = schedule?.id || "";
-    el("schedule-chat").value = schedule ? schedule.chat_id || "" : start.chat_id || "";
     el("schedule-name").value = schedule?.name || start.name || "";
     el("schedule-prompt").value = schedule?.prompt || start.prompt || "";
     el("schedule-mode").value = schedule?.mode || "default";
     showModels(schedule?.model || "");
+    const chat = schedule ? schedule.chat_id || "" : start.chat_id || "";
+    showTarget(chat, chat || start.chat_id || "");
     const shown = triggerOf(schedule?.spec || { kind: "interval", seconds: 3600 });
     el("schedule-trigger").value = shown.trigger;
     el("schedule-weekday").value = shown.weekday;
@@ -236,7 +262,7 @@
     try {
       await load();
       const schedule = scheduleOfChat(id);
-      if (schedule) { openEditor(schedule); return; }
+      if (schedule) { openEditor(schedule, { chat_id: id }); return; }
       const task = (await api(`tasks/${encodeURIComponent(id)}`)).task;
       const first = (task.turns || [])[0];
       openEditor(null, { chat_id: id, name: (task.title || "").slice(0, 80), prompt: first?.message || "" });
@@ -325,6 +351,7 @@
   };
   el("schedule-trigger").onchange = showTrigger;
   el("schedule-kind").onchange = showTrigger;
+  el("schedule-chat").onchange = showTargetNote;
   new MutationObserver(() => {
     clearInterval(timer);
     if (dialog.open) { refresh(); timer = setInterval(refresh, 15000); }

@@ -71,6 +71,15 @@ const assert = require('node:assert/strict');
       assert.equal(await page.locator('#schedule-time').isVisible(),false);
       assert.equal(await page.locator('#schedule-custom').isVisible(),false);
       assert.equal(await page.locator('#schedule-model option').first().textContent(),'Add-on default');
+      // Runs in names the chat the runs continue, offers a new chat each run instead, and says what a gone chat does.
+      const firstTitle=await page.evaluate(id=>chatById(id).title,chatId);
+      assert.equal(await page.locator('#schedule-chat').inputValue(),chatId);
+      await page.locator('#schedule-chat option').first().getByText(`This chat: ${firstTitle}`,{exact:true}).waitFor({state:'attached'});
+      assert.deepEqual(await page.locator('#schedule-chat option').allTextContents(),[`This chat: ${firstTitle}`,'A new chat each run']);
+      assert.match(await page.locator('#schedule-chat-note').textContent(),/If the chat is deleted or archived, or cannot continue, the run starts a new chat/);
+      await page.locator('#schedule-chat').selectOption('');
+      assert.match(await page.locator('#schedule-chat-note').textContent(),/^Each run starts a new chat/);
+      await page.locator('#schedule-chat').selectOption(chatId);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
       await page.locator('#schedule-name').fill('Sample schedule');
       await page.locator('#schedule-prompt').fill('<img src=x onerror=alert(1)> Inspect sample.');
@@ -113,12 +122,15 @@ const assert = require('node:assert/strict');
       assert.equal(await page.locator('#schedule-weekday').inputValue(),'5');
       assert.equal(await page.locator('#schedule-time').inputValue(),'07:05');
       assert.equal(await page.locator('#schedule-model').inputValue(),model);
+      // That schedule has no chat of its own: it keeps a new chat each run, and this chat is offered instead.
+      assert.equal(await page.locator('#schedule-chat').inputValue(),'');
+      assert.equal(await page.locator('#schedule-chat option').count(),2);
       // Daily, then a custom cron line that no preset names.
       await page.locator('#schedule-trigger').selectOption('daily');
       assert.equal(await page.locator('#schedule-weekday').isVisible(),false);
       await save.click();
       await editor.waitFor({state:'hidden'});
-      assert.equal(schedules[0].spec.expression,'5 7 * * *');
+      assert.equal(schedules[0].spec.expression,'5 7 * * *');assert.equal(schedules[0].chat_id,'');
       await openFromMenu();
       assert.equal(await page.locator('#schedule-trigger').inputValue(),'daily');
       assert.match(await page.locator('#schedule-state').textContent(),/^On · Every day at 07:05 \(America\/Chicago\) · /);
@@ -189,6 +201,12 @@ const assert = require('node:assert/strict');
       await page.locator('#schedule-list').getByRole('link',{name:'Sample older chat',exact:true}).waitFor();
       await page.locator('#schedule-list').getByText('Chat: not found; the next run starts a new chat',{exact:true}).waitFor();
       await page.locator('#schedule-list').getByText('Chat: a new chat for each run',{exact:true}).waitFor();
+      // Edit on the schedule whose chat is gone keeps that chat chosen and says the next run starts a new one.
+      await page.locator('#schedule-list > div').filter({hasText:'Gone'}).getByRole('button',{name:'Edit',exact:true}).click();
+      await editor.waitFor({state:'visible'});
+      await page.locator('#schedule-chat option').first().getByText('This chat (not found; the next run starts a new chat)',{exact:true}).waitFor({state:'attached'});
+      assert.equal(await page.locator('#schedule-chat').inputValue(),'sample-gone');
+      await editor.getByRole('button',{name:'Cancel',exact:true}).click();
       schedules=[kept];
       await page.evaluate(()=>document.querySelector('#settings').close()); await openSettings();
       // A masked prompt cannot be edited from Settings or from the chat: only read, paused or deleted.
@@ -229,7 +247,7 @@ const assert = require('node:assert/strict');
       await page.locator('#close-settings').click();
       assert.deepEqual(errors,[]);
       await page.close();
-      console.log(`PASS ${width}px: schedule editor from a chat's menu (hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, 'Set by Codex' on a wakeup, literal rendering and pending status.`);
+      console.log(`PASS ${width}px: schedule editor from a chat's menu (Runs in: this chat or a new chat each run; hourly, daily, weekly, custom), HA-zone one-off entry, masked prompt read-only, proposal approval, 'Set by Codex' on a wakeup, literal rendering and pending status.`);
     }
   } finally {await browser.close();}
 })().catch(error=>{console.error(error.stack);process.exitCode=1;});

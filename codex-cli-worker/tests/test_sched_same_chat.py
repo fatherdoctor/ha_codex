@@ -222,6 +222,16 @@ class WorkerTests(unittest.TestCase):
                 if changes is not None:
                     self.assertEqual(len(server.tasks[CHAT]['turns']), 1)
 
+    def test_a_run_whose_chat_is_mid_exchange_waits_and_never_opens_a_new_chat(self):
+        for status in ('queued', 'running'):
+            with self.subTest(status):
+                server.tasks.clear(); self.started.clear(); server.active_task_runners.clear()
+                self.owner_chat(status=status)
+                with self.assertRaises(scheduling.Busy):
+                    self.submit()
+                self.assertEqual((list(server.tasks), self.started), ([CHAT], []))
+                self.assertEqual(len(server.tasks[CHAT]['turns']), 1)
+
     def test_a_busy_worker_refuses_the_run_so_it_stays_due(self):
         self.owner_chat()
         server.active_task_runners.add('other-chat')

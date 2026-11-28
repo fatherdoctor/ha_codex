@@ -418,11 +418,14 @@
     <dialog id="schedule-dialog" class="studio-sheet" aria-labelledby="schedule-title">
       <div class="dialog-header"><h2 id="schedule-title">Schedule this chat</h2><button type="button" class="icon icon-close" data-close="schedule-dialog" aria-label="Close schedule"></button></div>
       <form id="schedule-form">
-        <input id="schedule-id" type="hidden" /><input id="schedule-chat" type="hidden" />
+        <input id="schedule-id" type="hidden" />
         <label for="schedule-name">Name</label><input id="schedule-name" maxlength="80" autocomplete="off" required />
         <label for="schedule-prompt">Prompt</label><textarea id="schedule-prompt" rows="6" maxlength="16000" required></textarea>
         <p id="schedule-masked" class="muted" hidden>This prompt contains masked credentials, so it cannot be edited here. Delete this schedule and make a new one with a complete prompt.</p>
         <label for="schedule-model">Model</label><select id="schedule-model"></select>
+        <p class="muted">Each run uses this model at the app's reasoning level. The chat keeps its own model and reasoning level for your next message.</p>
+        <label for="schedule-chat">Runs in</label><select id="schedule-chat"></select>
+        <p id="schedule-chat-note" class="muted"></p>
         <div class="schedule-trigger">
           <div><label for="schedule-trigger">Trigger</label><select id="schedule-trigger"><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="custom">Custom</option></select></div>
           <div id="schedule-weekday-field"><label for="schedule-weekday">Day</label><select id="schedule-weekday"><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></div>
