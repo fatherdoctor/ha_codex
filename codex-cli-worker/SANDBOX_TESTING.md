@@ -80,6 +80,14 @@ wrong-version CLI into a failure, so a move of the Codex pin must also move `PIN
 `test_live_proofs.py` (`test_fork_pins.py` checks that the two agree). Under `pytest`, the Home Assistant test
 plugin blocks sockets; these tests allow only 127.0.0.1 and Unix sockets for themselves.
 
+`test_memory_root_sandbox.py` checks, the same way, that a writable root inside a `.codex` folder (0.6 keeps
+memory in `/homeassistant/.codex/memory`) is writable while the rest of `.codex` stays read-only, also through a
+link at each old memory place. It prints each result for the pull request:
+
+```sh
+HA_TEST_CODEX=/path/to/codex-package/bin/codex python -m unittest codex-cli-worker/tests/test_memory_root_sandbox.py -v
+```
+
 ### HAOS parser and policy ABI
 
 HAOS 16–18.5 pins AppArmor 3.1.7. The profile declares `abi <abi/3.0>,` so

@@ -124,7 +124,7 @@ jobs:
         # Bubblewrap needs namespace privileges that the runner's default container profile withholds.
         # HA_TEST_REQUIRE_CODEX=1 turns a missing or wrong-version CLI into a failure instead of 18 skips.
         run: |
-          docker run --rm --privileged --workdir / --entrypoint python3 -e HA_TEST_REQUIRE_CODEX=1 -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test -m unittest -v /tests/test_sandbox_sockets.py /tests/test_live_proofs.py
+          docker run --rm --privileged --workdir / --entrypoint python3 -e HA_TEST_REQUIRE_CODEX=1 -v "$PWD/codex-cli-worker/tests:/tests:ro" verification-test -m unittest -v /tests/test_sandbox_sockets.py /tests/test_live_proofs.py /tests/test_memory_root_sandbox.py
       - name: Test packaged SSH with single-command approvals in both sandbox modes
         # Paramiko is a test-only SSH target in the disposable container.
         # The runtime image installs only the OpenSSH client, not an SSH server.
