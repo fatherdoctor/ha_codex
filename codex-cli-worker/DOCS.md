@@ -93,7 +93,8 @@ More: [Backups](https://github.com/fatherdoctor/ha_codex/blob/main/docs/app-refe
 A scheduled run sends a chat's message again on a timetable, such as every morning at 7. Open a chat's menu and choose
 **Schedule**, pick **Hourly**, **Daily**, **Weekly** or **Custom**, and choose **Create schedule**. Each run is the
 next message in that chat, so Codex remembers everything said before. If the chat was deleted or archived, or Codex
-cannot resume it, the run starts a new chat.
+cannot resume it, the run starts a new chat. To start a new chat for each run instead, set **Runs in** to **A new
+chat each run**. Each run uses the schedule's model at the app's reasoning level; the chat keeps its own settings.
 
 - Codex can **propose** a schedule. A repeating proposal stays off until an administrator approves it under
   **Settings** > **Scheduled runs**. A one-time wakeup that Codex proposes is on at once: it runs one time, in the

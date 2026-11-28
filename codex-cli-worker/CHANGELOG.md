@@ -2,6 +2,12 @@
 
 ## 0.6.0 (unreleased)
 
+- **The schedule editor says where the runs go.** A new **Runs in** choice shows the chat a schedule continues, by
+  name, or **A new chat each run**. A line under it says what happens when the chat is deleted, archived or cannot
+  continue (the run starts a new chat, and later runs continue there), and that a run waits while a chat is working.
+  A schedule that starts a new chat for each run can be moved to the chat whose menu opened it. A line under
+  **Model** says that each run uses the app's reasoning level, and that the chat keeps its own model and level.
+
 - **The checks list says what it means.** A check that proves something did not work reads **Failed** and is the only
   one in red. A check that could not confirm (Home Assistant was out of reach, or the check did not finish) now reads
   **Not confirmed**, in a calm color, where it read **Unverified** under a red "1 failed". The closed line and the line
